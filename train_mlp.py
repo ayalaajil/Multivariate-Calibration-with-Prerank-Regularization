@@ -2,11 +2,11 @@ import os
 from pathlib import Path
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 import json
 import typing as ty
 from sklearn.model_selection import train_test_split
 import torch
-import time
 from mlp import Standalone_RealMLP_TD_S_Classifier, Standalone_RealMLP_TD_S_Regressor
 np.random.seed(1)
 torch.manual_seed(1)
@@ -74,14 +74,22 @@ X = pd.concat([num_features, cat_features], axis=1)
 # X = np.concatenate((X_train, X_val), axis=0)
 y = np.concatenate((labels["train"], labels["val"]), axis=0)
 
+#Repeating the same process for test set
+num_features_test, cat_features_test, labels_test = test_data
+num_features_test = pd.DataFrame(num_features_test["test"])
+cat_features_test = pd.DataFrame(cat_features_test["test"])
+X_test = pd.concat([num_features_test, cat_features_test], axis=1)
+y_test = labels_test["test"]
+
 n_valid = 604
 X_train, X_val, y_train, y_val = train_test_split(X, y, test_size=n_valid, random_state=42)
 
 classification = True
-loss_type = 'rps'
-n_repeats = 1
+loss_type = 'brier'
+n_repeats = 10
 preds = []
 seed_offset=1000
+train_losses, test_losses, refinement_losses, calib_losses = [], [], [], []
 
 # start_time = time.time()
 for i in range(n_repeats):
@@ -93,9 +101,59 @@ for i in range(n_repeats):
         mlp = Standalone_RealMLP_TD_S_Classifier(loss_type=loss_type)
     else:
         mlp = Standalone_RealMLP_TD_S_Regressor()
-    mlp.fit(X_train, y_train, X_val, y_val)
+    mlp, train_loss, test_loss, refinement_loss, calib_loss = mlp.fit(X_train, y_train, X_val, y_val, X_test, y_test)
+    train_losses.append(train_loss)
+    test_losses.append(test_loss)
+    refinement_losses.append(refinement_loss)
+    calib_losses.append(calib_loss)
     # if classification:
     #     preds.append(mlp.predict_proba(X_test)[:, 1])
     # else:
     #     preds.append(mlp.predict(X_test))
     # print(f'{preds[-1].shape=}')
+
+
+# Replace these with your actual loss arrays (shape: 10 x 150)
+train_losses = np.array(train_losses)  # Shape (10, 150)
+test_losses = np.array(test_losses)  # Shape (10, 150)
+refinement_losses = np.array(refinement_losses)  # Shape (10, 150)
+calib_losses = np.array(calib_losses)  # Shape (10, 150)
+
+n_repeats, n_epochs = train_losses.shape
+
+# Compute mean and standard error across 10 runs
+train_mean = np.mean(train_losses, axis=0)
+train_std = np.std(train_losses, axis=0, ddof=1)
+
+test_mean = np.mean(test_losses, axis=0)
+test_std = np.std(test_losses, axis=0, ddof=1)
+
+refinement_mean = np.mean(refinement_losses, axis=0)
+refinement_std = np.std(refinement_losses, axis=0, ddof=1)
+
+calib_mean = np.mean(calib_losses, axis=0)
+calib_std = np.std(calib_losses, axis=0, ddof=1)
+
+# Plot each loss with standard error
+plt.figure(figsize=(12, 8))
+
+# plt.plot(train_mean, label="Train Loss", color='blue')
+# plt.fill_between(range(n_epochs), train_mean - train_std, train_mean + train_std, alpha=0.2, color='blue')
+
+plt.plot(test_mean, label="Test Loss", color='red')
+plt.fill_between(range(n_epochs), test_mean - test_std, test_mean + test_std, alpha=0.2, color='red')
+
+plt.plot(refinement_mean, label="Refinement Loss", color='green')
+plt.fill_between(range(n_epochs), refinement_mean - refinement_std, refinement_mean + refinement_std, alpha=0.2, color='green')
+
+plt.plot(calib_mean, label="Calibration Loss", color='purple')
+plt.fill_between(range(n_epochs), calib_mean - calib_std, calib_mean + calib_std, alpha=0.2, color='purple')
+
+plt.xlabel("Epochs")
+plt.ylabel("Loss")
+plt.title("RealMLP with Brier & Bisection TS")
+plt.legend()
+plt.grid()
+plt.savefig("figures/realmlp_brier_bisection.png", dpi=300, bbox_inches='tight')
+plt.show()
+
