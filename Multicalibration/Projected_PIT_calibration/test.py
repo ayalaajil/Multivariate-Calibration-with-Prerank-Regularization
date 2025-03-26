@@ -13,6 +13,7 @@ import torch
 import wandb
 
 wandb.init(project="conformal_regression", name="mixture_model")
+
 # Fonction pour projeter les échantillons sur les vecteurs
 def proj_for(x_values, u, sample):
     sample_proj = torch.matmul(sample, u)
@@ -67,26 +68,32 @@ def plot_pit(pit_values, dimension, n_samples):
 
 config = get_config()
 config.device = 'cpu'
-#rc = RunConfig(config, 'mulan', 'sf2')
-rc = RunConfig(config,'del_barrio', 'ansur2')
+#rc = RunConfig(config, 'mulan', 'rf2')
+#rc = RunConfig(config,'feldman', 'bio')
+rc = RunConfig(config,'camehl', 'households')
+#rc = RunConfig(config,'del_barrio', 'ansur2')
 datamodule = RealDataModule(rc)
 p, q = datamodule.input_dim, datamodule.output_dim
-#model = MixtureLightningModule(p,q)
-model = MQF2LightningModule(p, q)
+model = MixtureLightningModule(p,q)
+#model = MQF2LightningModule(p, q)
 trainer = get_lightning_trainer(rc)
 trainer.fit(model, datamodule)
 y_true = datamodule.get_data()[1]  # ou les valeurs réelles à prédire 
 data = datamodule.get_data()[0]
 if isinstance(data, np.ndarray):
     data = torch.tensor(data, dtype=torch.float32)
-y_pred = model.predict(data).sample((50,)) 
+y_pred = model.predict(data).sample((30,)) 
 
-
+'''print(y_true)
+print("Y_PRED")
 print(y_pred)
 d = len(y_pred[0][0])
-print(d)
 pca = PCA(n_components= d)
 pca.fit(y_pred.reshape(-1,d))
+vectors = pca.components_'''
+d = len(y_true[0])
+pca = PCA(n_components= d)
+pca.fit(y_true)
 vectors = pca.components_
 
 # Calcul des PIT

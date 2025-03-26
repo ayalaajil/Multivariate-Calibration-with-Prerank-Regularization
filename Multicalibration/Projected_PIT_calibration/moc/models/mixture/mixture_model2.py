@@ -151,40 +151,40 @@ class MixtureLightningModule(LightningModule):
         """
         # Sort the PIT values if necessary (sorting might depend on the context)
         Z_sorted = torch.sort(Z, dim=1)[0]# Sort the PIT values
+        print("Z_SORTED")
+        print(len(Z_sorted))
+        print(len(Z_sorted[0]))
 
         # Calculate the regularization term
         rqr = 0
-        #print(len(Z)) #2
-        #print(len(Z[0]))#peut être 198 ou 256
         for j in range(len(Z)):
             for i in range(N - k):
                 term = torch.log(((N + 1) / k) * (Z_sorted[j][i + k] - Z_sorted[j][i]))
-                rqr += term                                           #FAIRE LA SOMME DES 3 COMPOSANTES
-
+                rqr += term                                      
         return rqr / (N - k)
     
 
 
-    '''def compute_loss(self, dist, y): #with rqr
+    def compute_loss(self, dist, y): #with rqr
         """
         Compute the loss with the added regularization term based on PIT values.
         """
         # Compute PIT values
         sample_pred = self.sample(dist)
         pit_values = self.ensemble_PIT(sample_pred, y)
-        print(pit_values)
+
 
         # Compute RQR regularization term
-        N = pit_values.shape[0]  # Number of samples in the PIT values
-        rqr = self.rqr_regularization(pit_values, math.ceil(N-1) , N)
+        N = len(y)  # Number of samples in the PIT values
+        rqr = self.rqr_regularization(pit_values, 100, N)
 
 
         if self.hparams.loss == 'nll':
-            return -dist.log_prob(y).mean() + rqr
+            return -dist.log_prob(y).mean() +rqr
         elif self.hparams.loss == 'es':
-            return energy_score(dist, y, n_samples=self.hparams.es_num_samples) +rqr
+            return energy_score(dist, y, n_samples=self.hparams.es_num_samples) + rqr
         else:
-            raise ValueError(f'Invalid loss: {self.hparams.loss}')'''
+            raise ValueError(f'Invalid loss: {self.hparams.loss}')
         
 
 #-----------------------------------------------------------------------------------------------------------------------------------------------------
@@ -202,19 +202,20 @@ class MixtureLightningModule(LightningModule):
     def predict(self, x):
         return self(x)
 
-    def compute_loss(self, dist, y):
+    '''def compute_loss(self, dist, y):
         if self.hparams.loss == 'nll':
+            print(-dist.log_prob(y).mean())
             return -dist.log_prob(y).mean()
         elif self.hparams.loss == 'es':
+            print(energy_score(dist, y, n_samples=self.hparams.es_num_samples))
             return energy_score(dist, y, n_samples=self.hparams.es_num_samples)
         else:
-            raise ValueError(f'Invalid loss: {self.hparams.loss}')
+            raise ValueError(f'Invalid loss: {self.hparams.loss}')'''
 
     def step(self, batch):
         x, y = batch
         dist = self(x)
         loss = self.compute_loss(dist, y)
-        #print('Loss:', loss, flush=True)
         return loss
 
     def training_step(self, batch, batch_idx):
@@ -223,6 +224,7 @@ class MixtureLightningModule(LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
+        print("VAL")
         loss = self.step(batch)
         wandb.log({"val/loss": loss.item()})
         self.log(
