@@ -9,7 +9,6 @@ import wandb
 
 from moc.metrics.distribution_metrics import energy_score
 
-
 log = logging.getLogger('moc')
 
 
@@ -93,7 +92,8 @@ class MixtureLightningModule(LightningModule):
     ):
         super().__init__()
         self.save_hyperparameters()
-        wandb.config.update(self.hparams)
+        wandb.init(project="conformal_regression")
+        # wandb.config.update(self.hparams)
 
 
         output_dim = output_dim
@@ -110,36 +110,30 @@ class MixtureLightningModule(LightningModule):
             num_layers=self.hparams.num_layers,
         )
 
-#--------------------------------------------------------------------------------------------------------------------------------------------
-    
-
-
     # Fonction pour projeter les échantillons sur les vecteurs
     def proj_for(self, x_values, u, sample):
         sample_proj = torch.matmul(sample, u)
-        
         if x_values is None:
             x_values = sample
-
         x_proj = torch.matmul(x_values, u)
-        sample_sorted = torch.sort(sample_proj)[0]
-        n = len(sample)
-        
+        sample_sorted = torch.sort(sample_proj)[0] #256,100 sort across the columns
+        n = len(sample[0]) #100
         cdf_values = torch.searchsorted(sample_sorted, x_proj.unsqueeze(-1), side='right') / n
-        return x_proj, cdf_values
+        return x_proj, cdf_values #returns projected predictions and cdf values which represent where in the sorted projected samples the projected predictions lie
 
     # Fonction pour calculer les PIT
     def calculate_pit(self,values, u, sample):
         u = torch.as_tensor(u, dtype=sample.dtype, device=sample.device)
-        return self.proj_for(values, u, sample)[1]
+        pits = self.proj_for(values, u, sample)[1]
+        return pits
     
     def sample(self, dist, num_samples=100):
         return dist.sample((num_samples,)).permute(1, 0, 2)
 
     def ensemble_PIT(self, y_hat, y):
-        pca = PCA(n_components=len(y[0]))
+        pca = PCA(n_components=len(y[0])) #keeping all components, 4 in this case
         pca.fit(y_hat.reshape(-1,len(y[0])))
-        vectors = pca.components_
+        vectors = pca.components_ #4 by 4
         return torch.stack([self.calculate_pit(y, vectors[i], y_hat) for i in range(len(vectors))])
     
     def rqr_regularization(self, Z, k, N):
@@ -151,47 +145,47 @@ class MixtureLightningModule(LightningModule):
         """
         # Sort the PIT values if necessary (sorting might depend on the context)
         Z_sorted = torch.sort(Z, dim=1)[0]# Sort the PIT values
-        print("Z_SORTED")
-        print(len(Z_sorted))
-        print(len(Z_sorted[0]))
+        # print(len(Z_sorted))
+        # print(len(Z_sorted[0]))
 
         # Calculate the regularization term
         rqr = 0
-        for j in range(len(Z)):
+        for j in range(len(Z)): #loop over dimensions 4
+            uni_rqr = 0.0
             for i in range(N - k):
                 term = torch.log(((N + 1) / k) * (Z_sorted[j][i + k] - Z_sorted[j][i]))
-                rqr += term                                      
-        return rqr / (N - k)
+                uni_rqr += term  
+            rqr += uni_rqr/(N-k)                                    
+        return rqr/len(Z) #average over dimensions
     
 
 
-    def compute_loss(self, dist, y): #with rqr
+    def compute_loss(self, dist, y, lamda=0.01): #with rqr
         """
         Compute the loss with the added regularization term based on PIT values.
         """
         # Compute PIT values
         sample_pred = self.sample(dist)
-        pit_values = self.ensemble_PIT(sample_pred, y)
-
+        pit_values = self.ensemble_PIT(sample_pred, y) #4,256,1
 
         # Compute RQR regularization term
-        N = len(y)  # Number of samples in the PIT values
+        N = len(y)  # Number of samples in the PIT values, 256
         rqr = self.rqr_regularization(pit_values, 100, N)
-
-
+        
         if self.hparams.loss == 'nll':
-            return -dist.log_prob(y).mean() +rqr
+            loss_term = -dist.log_prob(y).mean()
+            reg_loss = loss_term + (lamda * rqr)
+            return reg_loss, loss_term, lamda*rqr, rqr
         elif self.hparams.loss == 'es':
-            return energy_score(dist, y, n_samples=self.hparams.es_num_samples) + rqr
+            loss_term = energy_score(dist, y, n_samples=self.hparams.es_num_samples)
+            reg_loss = loss_term + (lamda * rqr)
+            return reg_loss, loss_term, lamda*rqr, rqr
         else:
             raise ValueError(f'Invalid loss: {self.hparams.loss}')
         
-
-#-----------------------------------------------------------------------------------------------------------------------------------------------------
-
     def forward(self, x):
-        out = self.model(x)
-        out = out.split(self.output_shape, dim=-1)
+        out = self.model(x) #(batch_size, 75)
+        out = out.split(self.output_shape, dim=-1) #(batch_size, 5), (batch_size, 20), (batch_size, 50)
         params = extract_multivariate_normal_mixture_parameters(
             out,
             mixture_size=self.hparams.mixture_size,
@@ -202,39 +196,30 @@ class MixtureLightningModule(LightningModule):
     def predict(self, x):
         return self(x)
 
-    '''def compute_loss(self, dist, y):
-        if self.hparams.loss == 'nll':
-            print(-dist.log_prob(y).mean())
-            return -dist.log_prob(y).mean()
-        elif self.hparams.loss == 'es':
-            print(energy_score(dist, y, n_samples=self.hparams.es_num_samples))
-            return energy_score(dist, y, n_samples=self.hparams.es_num_samples)
-        else:
-            raise ValueError(f'Invalid loss: {self.hparams.loss}')'''
-
     def step(self, batch):
         x, y = batch
         dist = self(x)
-        loss = self.compute_loss(dist, y)
-        return loss
+        reg_loss, loss, lamda_rqr, rqr = self.compute_loss(dist, y)
+        return reg_loss, loss, lamda_rqr, rqr
 
     def training_step(self, batch, batch_idx):
-        loss = self.step(batch)
-        wandb.log({"train/loss": loss.item()})
-        return loss
+        reg_loss, loss, lamda_rqr, rqr = self.step(batch)
+        wandb.log({"train_reg_loss": reg_loss.item(), "train_loss": loss.item(),
+                   "train_lambda_rqr":lamda_rqr.item(), "train_rqr": rqr.item()})
+        return reg_loss
 
     def validation_step(self, batch, batch_idx):
-        print("VAL")
-        loss = self.step(batch)
-        wandb.log({"val/loss": loss.item()})
+        reg_loss, loss, lamda_rqr, rqr = self.step(batch)
+        wandb.log({"val_reg_loss": reg_loss.item(), "val_loss": loss.item(),
+                   "val_lambda_rqr":lamda_rqr.item(), "val_rqr": rqr.item()})
         self.log(
             f'val/loss',
-            loss,
+            reg_loss,
             on_step=False,
             on_epoch=True,
             prog_bar=True,
         )
-        return loss
+        return reg_loss
 
     def configure_optimizers(self):
         return torch.optim.Adam(params=self.parameters(), lr=self.hparams.lr)

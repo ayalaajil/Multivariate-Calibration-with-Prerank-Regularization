@@ -124,7 +124,7 @@ class BaseDataModule(LightningDataModule):
             generator=torch.Generator().manual_seed(self.hparams.seed),
         )
 
-        x, y = self.data_train[:]
+        x, y = self.data_train[:] #returns train data
         self.scaler_x = StandardScaler().fit(x)
         self.scaler_y = StandardScaler().fit(y)
 
