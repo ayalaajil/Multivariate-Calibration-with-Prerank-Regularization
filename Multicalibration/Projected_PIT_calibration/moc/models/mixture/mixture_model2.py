@@ -118,8 +118,8 @@ class MixtureLightningModule(LightningModule):
         x_proj = torch.matmul(x_values, u)
         sample_sorted = torch.sort(sample_proj)[0] #256,100 sort across the columns
         n = len(sample[0]) #100
-        cdf_values = torch.searchsorted(sample_sorted, x_proj.unsqueeze(-1), side='right') / n
-        return x_proj, cdf_values #returns projected predictions and cdf values which represent where in the sorted projected samples the projected predictions lie
+        cdf_values = torch.searchsorted(sample_sorted, x_proj.unsqueeze(-1), side='right') / n #256,1
+        return x_proj, cdf_values #returns projected predictions and cdf values which represent where in the sorted projected samples the projected ground truth lies
 
     # Fonction pour calculer les PIT
     def calculate_pit(self,values, u, sample):
@@ -144,7 +144,7 @@ class MixtureLightningModule(LightningModule):
         N: The total number of PIT values.
         """
         # Sort the PIT values if necessary (sorting might depend on the context)
-        Z_sorted = torch.sort(Z, dim=1)[0]# Sort the PIT values
+        Z_sorted = torch.sort(Z, dim=1)[0]# Sort the PIT values along 256
         # print(len(Z_sorted))
         # print(len(Z_sorted[0]))
 
@@ -165,12 +165,13 @@ class MixtureLightningModule(LightningModule):
         Compute the loss with the added regularization term based on PIT values.
         """
         # Compute PIT values
-        sample_pred = self.sample(dist)
+        sample_pred = self.sample(dist) #returns 256,100,4
         pit_values = self.ensemble_PIT(sample_pred, y) #4,256,1
 
         # Compute RQR regularization term
         N = len(y)  # Number of samples in the PIT values, 256
         rqr = self.rqr_regularization(pit_values, 100, N)
+        rqr = max(rqr, 0.0)
         
         if self.hparams.loss == 'nll':
             loss_term = -dist.log_prob(y).mean()
@@ -198,20 +199,20 @@ class MixtureLightningModule(LightningModule):
 
     def step(self, batch):
         x, y = batch
-        dist = self(x)
+        dist = self(x) #256 distributions in 4D
         reg_loss, loss, lamda_rqr, rqr = self.compute_loss(dist, y)
         return reg_loss, loss, lamda_rqr, rqr
 
     def training_step(self, batch, batch_idx):
         reg_loss, loss, lamda_rqr, rqr = self.step(batch)
         wandb.log({"train_reg_loss": reg_loss.item(), "train_loss": loss.item(),
-                   "train_lambda_rqr":lamda_rqr.item(), "train_rqr": rqr.item()})
+                   "train_lambda_rqr":lamda_rqr, "train_rqr": rqr})
         return reg_loss
 
     def validation_step(self, batch, batch_idx):
         reg_loss, loss, lamda_rqr, rqr = self.step(batch)
         wandb.log({"val_reg_loss": reg_loss.item(), "val_loss": loss.item(),
-                   "val_lambda_rqr":lamda_rqr.item(), "val_rqr": rqr.item()})
+                   "val_lambda_rqr":lamda_rqr, "val_rqr": rqr})
         self.log(
             f'val/loss',
             reg_loss,
