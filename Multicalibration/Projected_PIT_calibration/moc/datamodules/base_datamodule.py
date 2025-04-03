@@ -95,7 +95,7 @@ class BaseDataModule(LightningDataModule):
         return x[sample_idx], y[sample_idx]
 
     def load_datasets(self):
-        x, y = self.get_data()
+        x, y = self.get_data() #gets data from camehl etc.
         x = torch.from_numpy(x).to(torch.float32)
         y = torch.from_numpy(y).to(torch.float32)
         max_size = 2000000
