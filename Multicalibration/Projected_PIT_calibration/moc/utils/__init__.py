@@ -3,7 +3,7 @@ import warnings
 from pathlib import Path
 from typing import List, Optional, Sequence
 
-import lightning.pytorch as pl
+# import lightning.pytorch as pl
 import rich.syntax
 import rich.tree
 from omegaconf import DictConfig, OmegaConf
