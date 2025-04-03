@@ -6,6 +6,7 @@ from torch.distributions import MixtureSameFamily, Categorical, MultivariateNorm
 import math
 from sklearn.decomposition import PCA
 import wandb
+import numpy as np
 
 from moc.metrics.distribution_metrics import energy_score
 
@@ -79,6 +80,9 @@ def extract_multivariate_normal_mixture_parameters(params, mixture_size, output_
     return logits, locs, scale_trils
 
 
+
+
+
 class MixtureLightningModule(LightningModule):
     def __init__(
         self,
@@ -109,6 +113,8 @@ class MixtureLightningModule(LightningModule):
             hidden_size=self.hparams.hidden_size,
             num_layers=self.hparams.num_layers,
         )
+        self.name = "GaussianMixture"
+        self.validation_step_outputs = []
 
 #--------------------------------------------------------------------------------------------------------------------------------------------
     
@@ -123,7 +129,7 @@ class MixtureLightningModule(LightningModule):
 
         x_proj = torch.matmul(x_values, u)
         sample_sorted = torch.sort(sample_proj)[0]
-        n = len(sample)
+        n = len(sample[0])
         
         cdf_values = torch.searchsorted(sample_sorted, x_proj.unsqueeze(-1), side='right') / n
         return x_proj, cdf_values
@@ -133,7 +139,7 @@ class MixtureLightningModule(LightningModule):
         u = torch.as_tensor(u, dtype=sample.dtype, device=sample.device)
         return self.proj_for(values, u, sample)[1]
     
-    def sample(self, dist, num_samples=100):
+    def sample(self, dist, num_samples=1000):
         return dist.sample((num_samples,)).permute(1, 0, 2)
 
     def ensemble_PIT(self, y_hat, y):
@@ -151,21 +157,18 @@ class MixtureLightningModule(LightningModule):
         """
         # Sort the PIT values if necessary (sorting might depend on the context)
         Z_sorted = torch.sort(Z, dim=1)[0]# Sort the PIT values
-        print("Z_SORTED")
-        print(len(Z_sorted))
-        print(len(Z_sorted[0]))
 
         # Calculate the regularization term
         rqr = 0
         for j in range(len(Z)):
             for i in range(N - k):
-                term = torch.log(((N + 1) / k) * (Z_sorted[j][i + k] - Z_sorted[j][i]))
+                term = np.absolute(torch.log(((N + 1) / k) * (Z_sorted[j][i + k] - Z_sorted[j][i])))
                 rqr += term                                      
-        return rqr / (N - k)
+        return rqr / (len(Z)*(N - k))
     
 
 
-    def compute_loss(self, dist, y): #with rqr
+    def compute_loss_rqr(self, dist, y): 
         """
         Compute the loss with the added regularization term based on PIT values.
         """
@@ -180,12 +183,90 @@ class MixtureLightningModule(LightningModule):
 
 
         if self.hparams.loss == 'nll':
-            return -dist.log_prob(y).mean() +rqr
+            return -dist.log_prob(y).mean() + 0.5*rqr
         elif self.hparams.loss == 'es':
-            return energy_score(dist, y, n_samples=self.hparams.es_num_samples) + rqr
+            return energy_score(dist, y, n_samples=self.hparams.es_num_samples) + 0.5*rqr
         else:
             raise ValueError(f'Invalid loss: {self.hparams.loss}')
+    
+    def compute_quantiles(self, dist, quantile_levels, num_samples=100):
+        """
+        Compute the empirical quantiles of a given MixtureSameFamily distribution.
+
+        Args:
+            dist (MixtureSameFamily): The mixture distribution.
+            quantile_levels (list or tensor): A list of quantile levels (e.g., [0.1, 0.5, 0.9]).
+            num_samples (int): Number of samples to draw for estimation.
+
+        Returns:
+            Tensor: Estimated quantiles for each level.
+        """
+        # Generate samples from the distribution
+        samples = dist.sample((num_samples,))  # Shape: (num_samples, batch_size, dim)
         
+        # Sort samples along the first dimension
+        sorted_samples, _ = torch.sort(samples, dim=0)
+
+        # Compute quantiles by selecting the corresponding indices
+        quantile_indices = (torch.tensor(quantile_levels, device=samples.device) * (num_samples - 1)).long()
+        quantiles = sorted_samples[quantile_indices]
+
+        return quantiles
+    
+    def truncation_regularization(self, dist, y, alpha=0.1):
+        """
+        Compute the Truncation-based Calibration regularization term.
+
+        Args:
+            dist: MixtureSameFamily distribution.
+            y: Ground truth values (batch_size, dim).
+            alpha: Truncation threshold.
+
+        Returns:
+            Regularization value.
+        """
+        # Échantillonner les prévisions
+        num_samples = 100
+        y_hat = self.sample(dist, num_samples=num_samples)  # Shape: (num_samples, batch_size, dim)
+        
+        # Calculer les PIT
+        pit_values = self.ensemble_PIT(y_hat, y)  # Shape: (dim, batch_size, num_samples)
+        
+        # Estimation de la CDF du PIT à alpha
+        F_hat_alpha = (pit_values < alpha).float().mean(dim=-1)  # Moyenne sur les échantillons
+        
+        # Définition de ρ(x, y) = (y - x) 1(x < y)
+        def rho(x, y):
+            return (y - x) * (x < y).float()
+        
+        # Calcul de la régularisation
+        if F_hat_alpha.mean() < alpha:
+            reg_term = rho(self.compute_quantiles(dist, torch.tensor(alpha, device=y.device)), y).mean()
+            print("COUUUUUUUUUUUUUUUUUUUUUCOUUUUUUUUUUUUUU  ")
+            print( rho(self.compute_quantiles(dist,torch.tensor(alpha, device=y.device)), y))
+
+        else:
+            print("COUUUUUUUUUUUUUUUUUUUUUCOUUUUUUUUUUUUUU  ")
+            print(rho(y, self.compute_quantiles(dist,torch.tensor(alpha, device=y.device))))
+            reg_term = rho(y, self.compute_quantiles(dist,torch.tensor(alpha, device=y.device))).mean()
+        
+        return reg_term
+
+
+    def compute_loss(self, dist, y):
+        # Calcul du base loss (perte de base)
+        base_loss = -dist.log_prob(y).mean() if self.hparams.loss == 'nll' else energy_score(dist, y, self.hparams.es_num_samples)
+        
+        # Liste des valeurs alpha pour la régularisation
+        alphas = np.arange(0.1, 1.1, 0.1) 
+        
+        # Calcul de la régularisation pour chaque alpha et somme des termes
+        trunc_reg_sum = sum(self.truncation_regularization(dist, y, alpha=alpha) for alpha in alphas)
+        
+        # Retour de la perte totale avec la régularisation ajustée
+        return base_loss + 0.5 * trunc_reg_sum  # Facteur d'équilibrage
+
+    
 
 #-----------------------------------------------------------------------------------------------------------------------------------------------------
 
@@ -204,10 +285,10 @@ class MixtureLightningModule(LightningModule):
 
     '''def compute_loss(self, dist, y):
         if self.hparams.loss == 'nll':
-            print(-dist.log_prob(y).mean())
+            self.validation_step_outputs.append(-dist.log_prob(y).mean()) 
             return -dist.log_prob(y).mean()
         elif self.hparams.loss == 'es':
-            print(energy_score(dist, y, n_samples=self.hparams.es_num_samples))
+            self.validation_step_outputs.append(energy_score(dist, y, n_samples=self.hparams.es_num_samples))
             return energy_score(dist, y, n_samples=self.hparams.es_num_samples)
         else:
             raise ValueError(f'Invalid loss: {self.hparams.loss}')'''
@@ -224,9 +305,7 @@ class MixtureLightningModule(LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        print("VAL")
         loss = self.step(batch)
-        wandb.log({"val/loss": loss.item()})
         self.log(
             f'val/loss',
             loss,
@@ -234,10 +313,17 @@ class MixtureLightningModule(LightningModule):
             on_epoch=True,
             prog_bar=True,
         )
+        wandb.log({"val/loss_batch": loss.item()})
         return loss
 
     def configure_optimizers(self):
         return torch.optim.Adam(params=self.parameters(), lr=self.hparams.lr)
+    
+    '''def on_validation_epoch_end(self):
+        avg_loss = torch.stack(self.validation_step_outputs).mean()  # Moyenne sur tous les batches
+        self.log("val_loss", avg_loss, prog_bar=True, on_epoch=True, sync_dist=True)
+        self.validation_step_outputs.clear()  # Nettoyer pour la prochaine epoch
+        wandb.log({"val/loss_epoch": avg_loss.item()})'''
 
     @classmethod
     def output_type(cls):

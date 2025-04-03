@@ -61,6 +61,7 @@ class ScaledDataset(Dataset):
         return x, y
 
 
+
 class BaseDataModule(LightningDataModule):
     def __init__(
         self,
@@ -97,7 +98,7 @@ class BaseDataModule(LightningDataModule):
         x, y = self.get_data()
         x = torch.from_numpy(x).to(torch.float32)
         y = torch.from_numpy(y).to(torch.float32)
-        max_size = 20000
+        max_size = 2000000
         if self.rc.config.fast:
             max_size = 1000
         x, y = self.subsample(x, y, max_size=max_size)
@@ -150,14 +151,14 @@ class BaseDataModule(LightningDataModule):
             num_workers=self.hparams.num_workers,
             pin_memory=self.hparams.pin_memory,
             shuffle=shuffle,
-            drop_last=drop_last,
+            drop_last=drop_last
         )
 
     def train_dataloader(self):
         return self.get_dataloader(self.data_train, drop_last=True, shuffle=True)
     
     def val_dataloader(self):
-        return self.get_dataloader(self.data_val)
+        return self.get_dataloader(self.data_val) 
     
     def calib_dataloader(self):
         return self.get_dataloader(self.data_calib)

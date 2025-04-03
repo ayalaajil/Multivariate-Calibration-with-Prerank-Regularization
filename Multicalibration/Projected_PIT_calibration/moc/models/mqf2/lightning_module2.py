@@ -164,6 +164,7 @@ class MQF2LightningModule(LightningModule):
             threshold_input=self.hparams.threshold_input,
             estimate_logdet=self.hparams.estimate_logdet,
         )
+        self.name = "MQF2"
 
 
         #--------------------------------------------------------------------------------------------------------------------------------------------

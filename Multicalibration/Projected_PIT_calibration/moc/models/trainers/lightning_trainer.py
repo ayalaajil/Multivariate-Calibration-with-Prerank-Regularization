@@ -45,7 +45,7 @@ def get_lightning_trainer(rc):
         monitor='val/loss',
         mode='min',
         patience=15,
-        min_delta=0,
+        min_delta=1e-4 ,
     )
 
     callbacks = [ckpt, es, CustomLogger()]
