@@ -71,17 +71,18 @@ def pce_per_dataset(config, data_group, data_name, seeds):
         # pce_over_seeds.append(pce)
     return pce_over_seeds
 
-dataset_names = [['camehl', 'households'],
-                 ['mulan', 'scm20d'],
-                 ['mulan', 'rf2'],
-                 ['mulan', 'rf1'],
-                 ['mulan', 'scm1d'],
-                 ['feldman', 'meps_21'],
-                 ['feldman', 'meps_19'],
-                 ['feldman', 'meps_20'],
-                 ['feldman', 'house'],
-                 ['feldman', 'bio'],
-                 ['feldman', 'blog_data'],
+dataset_names = [
+                #  ['camehl', 'households'],
+                #  ['mulan', 'scm20d'],
+                #  ['mulan', 'rf2'],
+                #  ['mulan', 'rf1'],
+                #  ['mulan', 'scm1d'],
+                #  ['feldman', 'meps_21'],
+                #  ['feldman', 'meps_19'],
+                #  ['feldman', 'meps_20'],
+                #  ['feldman', 'house'],
+                #  ['feldman', 'bio'],
+                #  ['feldman', 'blog_data'],
                  ['del_barrio', 'calcofi'],
                  ['wang', 'taxi']
                  ]
@@ -94,6 +95,6 @@ for dataset in dataset_names:
     pce_over_seeds = pce_per_dataset(config, data_group, data_name, seeds)
     pces_across_datasets[f'{data_name}'] = np.array(pce_over_seeds)
 
-    with open("pce_across_dataset.pkl", "wb") as f:
+    with open("pce_calcofi_taxi.pkl", "wb") as f:
         pickle.dump(pces_across_datasets, f)
 
