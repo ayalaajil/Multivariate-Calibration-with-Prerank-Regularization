@@ -130,7 +130,6 @@ class MixtureLightningModule(LightningModule):
         x, y = batch
         dist = self(x)
         loss = self.compute_loss(dist, y)
-        #print('Loss:', loss, flush=True)
         return loss
 
     def training_step(self, batch, batch_idx):
