@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 import torch
 import wandb
+import optuna
 
 
 wandb.init(project="conformal_regression", name="mixture_model")
@@ -31,14 +32,8 @@ def proj_for(x_values, u, sample):
     sample_proj_2d = sample_proj.squeeze(-1)
     sample_sorted = torch.sort(sample_proj_2d, dim=-1)[0]
     n = len(sample[0])
-    print(n)
-    print(len(sample))
-    print("len(x_values)")
-    print(len(x_values))
 
     cdf_values = torch.searchsorted(sample_sorted, x_proj.unsqueeze(-1), side='right') / n
-    print("len(cdf_values)")
-    print(len(cdf_values))
     return x_proj, cdf_values
 
 def calculate_pit(values, u, sample):
@@ -75,11 +70,46 @@ def plot_pit(pit_values, dimension, n_samples):
     plt.savefig(filename)
     plt.show()
 
+def ensemble_PIT(samples, y):
+        pca = PCA(n_components=len(y[0])) #keeping all components, 4 in this case
+        pca.fit(samples.reshape(-1,len(y[0])))
+        vectors = pca.components_ #4 by 4
+        pits = []
+        for i in range(len(vectors)):
+            u = torch.as_tensor(vectors[i], dtype=samples.dtype, device=samples.device)
+            sample_proj = torch.matmul(samples, u) # 256,100,1
+            y_proj = torch.matmul(y, u) #256,1
+            sample_sorted = torch.sort(sample_proj)[0] #256,100 sort across the columns
+            n = len(samples[0]) #100
+            cdf_values = torch.searchsorted(sample_sorted, y_proj.unsqueeze(-1), side='right') / n #256,1
+            pits.append(cdf_values)
+        return torch.stack(pits)
 
+
+def pce(model, dataset):
+    total_pits = []
+    for x, y in dataset:
+        x = x.to(config.device)
+        y = y.to(config.device)
+        dist = model.predict(x)
+        samples = dist.sample((100,)).permute(1, 0, 2) #256,100,4
+
+        pit_values = ensemble_PIT(samples, y) #shape (4,256,1)
+        total_pits.append(pit_values)
+    total_pits = torch.cat(total_pits, dim=1)
+
+    pits = total_pits[0].view(-1) #taking the first dimension only, shape (256,)
+    pits_sorted = pits.sort()[0]
+    cdf_estimates = torch.searchsorted(pits_sorted, alphas, side='right') / pits_sorted.numel() #shape (100,)
+    pce = torch.mean(torch.abs(cdf_estimates - alphas)).item()
+    return pce
+     
 
 config = get_config()
 config.device = 'cpu'
-dataset = ('mulan', 'sf2')
+M = 100
+alphas = torch.linspace(0, 1, M, device=config.device)
+dataset = ('mulan', 'rf1')
 n_samples = 100
 rc = RunConfig(config, dataset[0], dataset[1])
 dataset_name = dataset[0]+"_"+dataset[1]
@@ -87,20 +117,49 @@ dataset_name = dataset[0]+"_"+dataset[1]
 #rc = RunConfig(config,'camehl', 'households')
 #rc = RunConfig(config,'del_barrio', 'ansur2')
 datamodule = RealDataModule(rc)
-p, q = datamodule.input_dim, datamodule.output_dim 
-model = MixtureLightningModule(p,q)
+p, q = datamodule.input_dim, datamodule.output_dim
+'''best_lambda = 0.1
+model = MixtureLightningModule(p,q, best_lambda)
+model_name = model.name
+#model = MQF2LightningModule(p, q)
+trainer = get_lightning_trainer(rc)
+trainer.fit(model, datamodule)
+best_metric = pce(model, datamodule.train_dataloader())
+print(best_metric)'''
+
+
+def objective(trial):
+    lambda_reg = trial.suggest_float('lambda_reg', 1e-6, 50, log=True)
+    model = MixtureLightningModule(p,q, lambda_reg)
+    trainer = get_lightning_trainer(rc)
+    trainer.fit(model, datamodule)
+    score = pce(model, datamodule.val_dataloader())
+    print(f"Trial {trial.number} - lambda: {lambda_reg:.1e} - PCE: {score:.4f}")
+    return score
+
+study = optuna.create_study(direction='minimize')
+study.optimize(objective, n_trials=10)
+best_lambda = study.best_trial.params["lambda_reg"]
+
+
+'''for lambda_reg in [1e-6, 1e-5, 1e-4, 1e-3, 1e-2]:
+    model = MixtureLightningModule(p,q, lambda_reg)
+    model_name = model.name
+    #model = MQF2LightningModule(p, q)
+    trainer = get_lightning_trainer(rc)
+    trainer.fit(model, datamodule)
+    metric = pce(model, datamodule.train_dataloader())
+    if metric < best_metric:
+                best_metric = metric
+                best_lambda = lambda_reg
+                print(best_lambda)'''
+model = MixtureLightningModule(p,q, best_lambda)
 model_name = model.name
 #model = MQF2LightningModule(p, q)
 trainer = get_lightning_trainer(rc)
 trainer.fit(model, datamodule)
 test_batch = next(iter(datamodule.test_dataloader()))
 data, y_true = test_batch
-print("len(data)")
-print(len(datamodule.get_data())) 
-print(len(datamodule.get_data()[0]))
-print(len(data[0]))
-print("len(y_true[0])")
-print(len(y_true[0]))
 if isinstance(data, np.ndarray):
     data = torch.tensor(data, dtype=torch.float32)
 #y_pred = model.predict(data).sample((30,)) 

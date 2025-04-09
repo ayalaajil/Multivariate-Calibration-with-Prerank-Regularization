@@ -87,6 +87,7 @@ class MixtureLightningModule(LightningModule):
         self,
         input_dim: int,
         output_dim: int,
+        lambda_reg:float,
         hidden_size: int = 100,
         num_layers: int = 3,
         loss: str = 'nll',
@@ -102,6 +103,7 @@ class MixtureLightningModule(LightningModule):
 
         output_dim = output_dim
         mixture_size = self.hparams.mixture_size
+        self.lambda_reg = lambda_reg
         self.output_shape = (
             mixture_size,
             mixture_size * output_dim,
@@ -115,30 +117,28 @@ class MixtureLightningModule(LightningModule):
         )
         self.name = "GaussianMixture"
         self.validation_step_outputs = []
+        self.train_step_outputs = []
 
-    # Fonction pour projeter les échantillons sur les vecteurs
-    def proj_for(self, x_values, u, sample):
+
+    def project_along_pca(self, samples, pca_vectors):
+        return torch.matmul(samples, torch.tensor(pca_vectors, dtype=samples.dtype, device=samples.device))
+
+    
+
+    def proj_emp_cdf(self, x_values, u, sample):
         sample_proj = torch.matmul(sample, u)
         if x_values is None:
             x_values = sample
         x_proj = torch.matmul(x_values, u)
-<<<<<<< HEAD
-        sample_sorted = torch.sort(sample_proj)[0]
-        n = len(sample[0])
-        
-        cdf_values = torch.searchsorted(sample_sorted, x_proj.unsqueeze(-1), side='right') / n
-        return x_proj, cdf_values
-=======
         sample_sorted = torch.sort(sample_proj)[0] #256,100 sort across the columns
         n = len(sample[0]) #100
         cdf_values = torch.searchsorted(sample_sorted, x_proj.unsqueeze(-1), side='right') / n #256,1
         return x_proj, cdf_values #returns projected predictions and cdf values which represent where in the sorted projected samples the projected ground truth lies
->>>>>>> 124cf8d3e389937a2260f717dc3c7b5a272d6ed9
 
     # Fonction pour calculer les PIT
     def calculate_pit(self,values, u, sample):
         u = torch.as_tensor(u, dtype=sample.dtype, device=sample.device)
-        pits = self.proj_for(values, u, sample)[1]
+        pits = self.proj_emp_cdf(values, u, sample)[1]
         return pits
     
     def sample(self, dist, num_samples=1000):
@@ -148,7 +148,7 @@ class MixtureLightningModule(LightningModule):
         pca = PCA(n_components=len(y[0])) #keeping all components, 4 in this case
         pca.fit(y_hat.reshape(-1,len(y[0])))
         vectors = pca.components_ #4 by 4
-        return torch.stack([self.calculate_pit(y, vectors[i], y_hat) for i in range(len(vectors))])
+        return torch.stack([self.calculate_pit(y, vectors[i], y_hat) for i in range(len(vectors))]), vectors
     
     def rqr_regularization(self, Z, k, N):
         """
@@ -158,55 +158,36 @@ class MixtureLightningModule(LightningModule):
         N: The total number of PIT values.
         """
         # Sort the PIT values if necessary (sorting might depend on the context)
-<<<<<<< HEAD
-        Z_sorted = torch.sort(Z, dim=1)[0]# Sort the PIT values
-=======
         Z_sorted = torch.sort(Z, dim=1)[0]# Sort the PIT values along 256
         # print(len(Z_sorted))
         # print(len(Z_sorted[0]))
->>>>>>> 124cf8d3e389937a2260f717dc3c7b5a272d6ed9
 
         # Calculate the regularization term
         rqr = 0
         for j in range(len(Z)): #loop over dimensions 4
             uni_rqr = 0.0
             for i in range(N - k):
-<<<<<<< HEAD
                 term = np.absolute(torch.log(((N + 1) / k) * (Z_sorted[j][i + k] - Z_sorted[j][i])))
-                rqr += term                                      
-        return rqr / (len(Z)*(N - k))
-    
-
-
-    def compute_loss_rqr(self, dist, y): 
-=======
-                term = torch.log(((N + 1) / k) * (Z_sorted[j][i + k] - Z_sorted[j][i]))
-                uni_rqr += term  
+                uni_rqr += term  # Weight proportional to the importance of the component ???
             rqr += uni_rqr/(N-k)                                    
         return rqr/len(Z) #average over dimensions
     
 
 
-    def compute_loss(self, dist, y, lamda=0.01): #with rqr
->>>>>>> 124cf8d3e389937a2260f717dc3c7b5a272d6ed9
+    '''def compute_loss(self, dist, y, lamda=0.1): #with rqr
         """
         Compute the loss with the added regularization term based on PIT values.
         """
         # Compute PIT values
         sample_pred = self.sample(dist) #returns 256,100,4
-        pit_values = self.ensemble_PIT(sample_pred, y) #4,256,1
+        pit_values = self.ensemble_PIT(sample_pred, y)[0] #4,256,1
 
         # Compute RQR regularization term
         N = len(y)  # Number of samples in the PIT values, 256
         rqr = self.rqr_regularization(pit_values, 100, N)
-        rqr = max(rqr, 0.0)
+        #rqr = max(rqr, 0.0)
         
         if self.hparams.loss == 'nll':
-<<<<<<< HEAD
-            return -dist.log_prob(y).mean() + 0.5*rqr
-        elif self.hparams.loss == 'es':
-            return energy_score(dist, y, n_samples=self.hparams.es_num_samples) + 0.5*rqr
-=======
             loss_term = -dist.log_prob(y).mean()
             reg_loss = loss_term + (lamda * rqr)
             return reg_loss, loss_term, lamda*rqr, rqr
@@ -214,36 +195,62 @@ class MixtureLightningModule(LightningModule):
             loss_term = energy_score(dist, y, n_samples=self.hparams.es_num_samples)
             reg_loss = loss_term + (lamda * rqr)
             return reg_loss, loss_term, lamda*rqr, rqr
->>>>>>> 124cf8d3e389937a2260f717dc3c7b5a272d6ed9
         else:
-            raise ValueError(f'Invalid loss: {self.hparams.loss}')
+            raise ValueError(f'Invalid loss: {self.hparams.loss}')'''
     
-    def compute_quantiles(self, dist, quantile_levels, num_samples=100):
-        """
-        Compute the empirical quantiles of a given MixtureSameFamily distribution.
+    def compute_quantiles(self, y_hat, y, quantile_levels):
+        pit_vals, pca_vectors = self.ensemble_PIT(y_hat, y)
+        '''y_hat_proj = torch.stack([self.proj_emp_cdf(y_hat, pca[i], sample)[1] for i in range(len(pca))])
+        y_proj = torch.stack([self.proj_emp_cdf(y, pca[i], sample)[1] for i in range(len(pca))])
 
-        Args:
-            dist (MixtureSameFamily): The mixture distribution.
-            quantile_levels (list or tensor): A list of quantile levels (e.g., [0.1, 0.5, 0.9]).
-            num_samples (int): Number of samples to draw for estimation.
+        above = y_hat_proj>= quantile_levels
+        print(above)
+        above = above.squeeze(-1) 
+        has_true = above.any(dim=1)
+        first_true_indices = torch.where(
+        has_true,
+        above.float().argmax(dim=1),
+        torch.tensor(-1) 
+        )
+        print(first_true_indices)
+        batch_size, num_points = sorted_pit.shape[:2]
+        safe_indices = torch.where(first_true_indices == -1,
+                                   torch.tensor(num_points - 1, device=first_true_indices.device),
+                                   first_true_indices)
+        # Create batch indices for gather
+        batch_indices = torch.arange(batch_size, device=first_true_indices.device)
 
-        Returns:
-            Tensor: Estimated quantiles for each level.
-        """
-        # Generate samples from the distribution
-        samples = dist.sample((num_samples,))  # Shape: (num_samples, batch_size, dim)
-        
-<<<<<<< HEAD
-        # Sort samples along the first dimension
-        sorted_samples, _ = torch.sort(samples, dim=0)
+        # Retrieve the quantiles in terms of PIT values
+        quantiles = sorted_pit[batch_indices, safe_indices]
 
-        # Compute quantiles by selecting the corresponding indices
-        quantile_indices = (torch.tensor(quantile_levels, device=samples.device) * (num_samples - 1)).long()
-        quantiles = sorted_samples[quantile_indices]
+        return torch.stack(quantiles)  # Shape: (8,)'''
+        quantiles = []
+        for i in range(len(pca_vectors)):  # For each PCA component
+            # Project the predictions along the PCA vector
+            projections = self.project_along_pca(y_hat, pca_vectors[i])
+            #print(len(projections))#256
+            #print(len(projections[0]))#100
 
-        return quantiles
+            # Sort the projections along the last dimension (samples)
+            sorted_proj = torch.sort(projections, dim=-1)[0]
+            #print(sorted_proj[0])
+
+            # Compute the index of the quantile for each sample
+            n = sorted_proj.shape[-1]  # Number of samples i.e. 100
+            quantile_index = int(quantile_levels * (n - 1)) #9
+
+            # Select the quantile value based on the sorted projections
+            quantile_values = sorted_proj[..., quantile_index].unsqueeze(-1) #256 values
+
+            quantiles.append(quantile_values)
+        #print(len(quantiles)) 8 (each dimension)
+
+        # Stack the quantiles along the component dimension
+        #print(len(torch.cat(quantiles, dim=0)) ) 2048=256x8
+        return torch.stack(quantiles, dim=0)
+
     
-    def truncation_regularization(self, dist, y, alpha=0.1):
+    def truncation_regularization(self, dist, y, alpha=1):
         """
         Compute the Truncation-based Calibration regularization term.
 
@@ -260,33 +267,40 @@ class MixtureLightningModule(LightningModule):
         y_hat = self.sample(dist, num_samples=num_samples)  # Shape: (num_samples, batch_size, dim)
         
         # Calculer les PIT
-        pit_values = self.ensemble_PIT(y_hat, y)  # Shape: (dim, batch_size, num_samples)
+        pit_values, pca_vectors = self.ensemble_PIT(y_hat, y) # Shape: (dim, batch_size, num_samples)
+        #print(len(pit_values)) #3
+        #print(len(pit_values[0]))#256
         
         # Estimation de la CDF du PIT à alpha
         F_hat_alpha = (pit_values < alpha).float().mean(dim=-1)  # Moyenne sur les échantillons
+        #print(len(F_hat_alpha))#3
+        #print(len(F_hat_alpha[0]))#256
+
         
         # Définition de ρ(x, y) = (y - x) 1(x < y)
         def rho(x, y):
             return (y - x) * (x < y).float()
         
+        reg_term = 0 
+        dim = len(y[0])
         # Calcul de la régularisation
         if F_hat_alpha.mean() < alpha:
-            reg_term = rho(self.compute_quantiles(dist, torch.tensor(alpha, device=y.device)), y).mean()
-            print("COUUUUUUUUUUUUUUUUUUUUUCOUUUUUUUUUUUUUU  ")
-            print( rho(self.compute_quantiles(dist,torch.tensor(alpha, device=y.device)), y))
+            for i in range(dim):
+                reg_term += rho(self.compute_quantiles(y_hat, y, torch.tensor(alpha, device=y.device))[i], self.project_along_pca(y, pca_vectors[i])).mean()
 
         else:
-            print("COUUUUUUUUUUUUUUUUUUUUUCOUUUUUUUUUUUUUU  ")
-            print(rho(y, self.compute_quantiles(dist,torch.tensor(alpha, device=y.device))))
-            reg_term = rho(y, self.compute_quantiles(dist,torch.tensor(alpha, device=y.device))).mean()
+            for i in range(dim):
+                # print(len(rho(self.project_along_pca(y, pca_vectors[i]), self.compute_quantiles(y_hat, y,torch.tensor(alpha, device=y.device))))) 8
+                #print(len(self.compute_quantiles(y_hat, y,torch.tensor(alpha, device=y.device))[i]))#256
+                #print(len(self.compute_quantiles(y_hat, y,torch.tensor(alpha, device=y.device)))) 8
+                #print(len(self.project_along_pca(y, pca_vectors[i]))) 256
+                reg_term += rho(self.project_along_pca(y, pca_vectors[i]), self.compute_quantiles(y_hat, y,torch.tensor(alpha, device=y.device))[i]).mean()
+            reg_term/=dim
         
         return reg_term
 
 
-    def compute_loss(self, dist, y):
-        # Calcul du base loss (perte de base)
-        base_loss = -dist.log_prob(y).mean() if self.hparams.loss == 'nll' else energy_score(dist, y, self.hparams.es_num_samples)
-        
+    def compute_loss(self, dist, y,  lamda):
         # Liste des valeurs alpha pour la régularisation
         alphas = np.arange(0.1, 1.1, 0.1) 
         
@@ -294,14 +308,46 @@ class MixtureLightningModule(LightningModule):
         trunc_reg_sum = sum(self.truncation_regularization(dist, y, alpha=alpha) for alpha in alphas)
         
         # Retour de la perte totale avec la régularisation ajustée
-        return base_loss + 0.5 * trunc_reg_sum  # Facteur d'équilibrage
+        if self.hparams.loss == 'nll':
+            loss_term = -dist.log_prob(y).mean()
+            reg_loss = loss_term + (lamda * trunc_reg_sum)
+            return reg_loss, loss_term, lamda*trunc_reg_sum, trunc_reg_sum
+        elif self.hparams.loss == 'es':
+            loss_term = energy_score(dist, y, n_samples=self.hparams.es_num_samples)
+            reg_loss = loss_term + (lamda * trunc_reg_sum)
+            return reg_loss, loss_term, lamda*trunc_reg_sum, trunc_reg_sum
+        
+    def smooth_indicator(self, a, b, tau=10.0):
+        return torch.sigmoid(tau * (b - a))
+
+    def kde_cdf_smoothed(self, z_vals, alphas, tau):
+        z_vals = z_vals.unsqueeze(0)     # (1, N)
+        alphas = alphas.unsqueeze(1)     # (M, 1)
+        smoothed_indicators = torch.sigmoid(tau * (alphas - z_vals))  # (M, N)
+        return smoothed_indicators.mean(dim=1)  # Moyenne sur les N, résultat (M,)
+    
+    tau = 0.5
+    p = 1
+
+    def compute_loss_kde(self, dist, y, lamda):
+        sample_pred = self.sample(dist) #returns 256,100,4
+        pit_values = self.ensemble_PIT(sample_pred, y)[0] #4,256,1
+        phi_kde =self.kde_cdf_smoothed(pit_values, alphas, tau=tau)  # (M,)
+        reg_kde = (torch.abs(alphas - phi_kde) ** p).mean()
+        if self.hparams.loss == 'nll':
+            loss_term = -dist.log_prob(y).mean()
+            reg_loss = loss_term + (lamda * reg_kde)
+            return reg_loss, loss_term, lamda*reg_kde, reg_kde
+        elif self.hparams.loss == 'es':
+            loss_term = energy_score(dist, y, n_samples=self.hparams.es_num_samples)
+            reg_loss = loss_term + (lamda * reg_kde)
+            return reg_loss, loss_term, lamda*reg_kde, reg_kde
+
 
     
 
 #-----------------------------------------------------------------------------------------------------------------------------------------------------
 
-=======
->>>>>>> 124cf8d3e389937a2260f717dc3c7b5a272d6ed9
     def forward(self, x):
         out = self.model(x) #(batch_size, 75)
         out = out.split(self.output_shape, dim=-1) #(batch_size, 5), (batch_size, 20), (batch_size, 50)
@@ -315,7 +361,6 @@ class MixtureLightningModule(LightningModule):
     def predict(self, x):
         return self(x)
 
-<<<<<<< HEAD
     '''def compute_loss(self, dist, y):
         if self.hparams.loss == 'nll':
             self.validation_step_outputs.append(-dist.log_prob(y).mean()) 
@@ -326,50 +371,43 @@ class MixtureLightningModule(LightningModule):
         else:
             raise ValueError(f'Invalid loss: {self.hparams.loss}')'''
 
-=======
->>>>>>> 124cf8d3e389937a2260f717dc3c7b5a272d6ed9
     def step(self, batch):
         x, y = batch
         dist = self(x) #256 distributions in 4D
-        reg_loss, loss, lamda_rqr, rqr = self.compute_loss(dist, y)
+        reg_loss, loss, lamda_rqr, rqr = self.compute_loss(dist, y, self.lambda_reg)
         return reg_loss, loss, lamda_rqr, rqr
 
     def training_step(self, batch, batch_idx):
         reg_loss, loss, lamda_rqr, rqr = self.step(batch)
-        wandb.log({"train_reg_loss": reg_loss.item(), "train_loss": loss.item(),
-                   "train_lambda_rqr":lamda_rqr, "train_rqr": rqr})
+        self.train_step_outputs.append(reg_loss)
+        '''wandb.log({"train_reg_loss": reg_loss.item(), "train_loss": loss.item(),
+                   "train_lambda_rqr":lamda_rqr, "train_rqr": rqr})'''
         return reg_loss
+    
+
+    def on_train_epoch_end(self):
+        avg_loss = torch.stack(self.train_step_outputs).mean()  # Moyenne sur tous les batches
+        self.log("train_loss", avg_loss, prog_bar=True, on_epoch=True, sync_dist=True)
+        self.train_step_outputs.clear()  # Nettoyer pour la prochaine epoch
+        wandb.log({"train/loss_epoch": avg_loss.item()})
+        
 
     def validation_step(self, batch, batch_idx):
-<<<<<<< HEAD
-        loss = self.step(batch)
-=======
         reg_loss, loss, lamda_rqr, rqr = self.step(batch)
-        wandb.log({"val_reg_loss": reg_loss.item(), "val_loss": loss.item(),
-                   "val_lambda_rqr":lamda_rqr, "val_rqr": rqr})
->>>>>>> 124cf8d3e389937a2260f717dc3c7b5a272d6ed9
-        self.log(
-            f'val/loss',
-            reg_loss,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=True,
-        )
-<<<<<<< HEAD
-        wandb.log({"val/loss_batch": loss.item()})
-        return loss
-=======
+        self.validation_step_outputs.append(reg_loss)
+        '''wandb.log({"val_reg_loss": reg_loss.item(), "val_loss": loss.item(),
+                   "val_lambda_rqr":lamda_rqr, "val_rqr": rqr})'''
         return reg_loss
->>>>>>> 124cf8d3e389937a2260f717dc3c7b5a272d6ed9
+    
 
     def configure_optimizers(self):
         return torch.optim.Adam(params=self.parameters(), lr=self.hparams.lr)
     
-    '''def on_validation_epoch_end(self):
+    def on_validation_epoch_end(self):
         avg_loss = torch.stack(self.validation_step_outputs).mean()  # Moyenne sur tous les batches
         self.log("val_loss", avg_loss, prog_bar=True, on_epoch=True, sync_dist=True)
         self.validation_step_outputs.clear()  # Nettoyer pour la prochaine epoch
-        wandb.log({"val/loss_epoch": avg_loss.item()})'''
+        wandb.log({"val/loss_epoch": avg_loss.item()})
 
     @classmethod
     def output_type(cls):

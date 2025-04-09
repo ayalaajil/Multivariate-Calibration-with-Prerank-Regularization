@@ -31,7 +31,7 @@ def get_lightning_trainer(rc):
     # - Patience of 15
 
     ckpt = ModelCheckpoint(
-        monitor='val/loss',
+        monitor='val_loss',
         mode='min',
         save_top_k=1,  # save k best models (determined by above metric)
         save_last=False,  # save model from last epoch
@@ -42,7 +42,7 @@ def get_lightning_trainer(rc):
     )
 
     es = EarlyStopping(
-        monitor='val/loss',
+        monitor='val_loss',
         mode='min',
         patience=15,
         min_delta=1e-4 ,
