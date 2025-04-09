@@ -158,9 +158,7 @@ class MixtureLightningModule(LightningModule):
         N: The total number of PIT values.
         """
         # Sort the PIT values if necessary (sorting might depend on the context)
-        Z_sorted = torch.sort(Z, dim=1)[0]# Sort the PIT values along 256
-        # print(len(Z_sorted))
-        # print(len(Z_sorted[0]))
+        Z_sorted = torch.sort(Z, dim=1)[0]# Sort the PIT values
 
         # Calculate the regularization term
         rqr = 0
@@ -343,10 +341,6 @@ class MixtureLightningModule(LightningModule):
             reg_loss = loss_term + (lamda * reg_kde)
             return reg_loss, loss_term, lamda*reg_kde, reg_kde
 
-
-    
-
-#-----------------------------------------------------------------------------------------------------------------------------------------------------
 
     def forward(self, x):
         out = self.model(x) #(batch_size, 75)

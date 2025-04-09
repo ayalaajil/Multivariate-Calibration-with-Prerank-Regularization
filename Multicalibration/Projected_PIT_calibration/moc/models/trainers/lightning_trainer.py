@@ -35,7 +35,7 @@ def get_lightning_trainer(rc):
         mode='min',
         save_top_k=1,  # save k best models (determined by above metric)
         save_last=False,  # save model from last epoch
-        verbose=False,
+        verbose=True,
         dirpath=str(rc.checkpoints_path),
         filename='epoch_{epoch:04d}',
         auto_insert_metric_name=False,
@@ -46,6 +46,7 @@ def get_lightning_trainer(rc):
         mode='min',
         patience=15,
         min_delta=1e-4 ,
+        verbose = True,
     )
 
     callbacks = [ckpt, es, CustomLogger()]
@@ -63,7 +64,7 @@ def get_lightning_trainer(rc):
         # number of validation steps to execute at the beginning of the training
         num_sanity_val_steps=0,
         log_every_n_steps=1,
-        check_val_every_n_epoch=2,
+        check_val_every_n_epoch=1,
         enable_model_summary=False,
         enable_progress_bar=False,
         callbacks=callbacks,
