@@ -13,7 +13,7 @@ from moc.metrics.distribution_metrics import energy_score
 
 reg_path = Path(__file__).resolve().parents[2]
 sys.path.append(str(reg_path))
-from regularizers.reguls import rqr_regularization, truncation_regularization
+from regularizers.reguls import rqr_regularization, truncation_regularization, pce_kde_regularization
 log = logging.getLogger('moc')
 
 class MLP(torch.nn.Module):
@@ -177,6 +177,8 @@ class MixtureLightningModule(LightningModule):
             reg_term = rqr_regularization(dist, y)
         elif self.reg_type == 'truncation':
             reg_term = truncation_regularization(dist, y)
+        elif self.reg_type == 'pce-kde':
+            reg_term = pce_kde_regularization(dist, y)
         else:
             reg_term = 0.0
         # rqr = self.rqr_regularization(pit_values, 100, N)
@@ -313,41 +315,6 @@ class MixtureLightningModule(LightningModule):
     #         reg_loss = loss_term + (lamda * trunc_reg_sum)
     #         return reg_loss, loss_term, lamda*trunc_reg_sum, trunc_reg_sum
         
-    def smooth_indicator(self, a, b, tau=10.0):
-        return torch.sigmoid(tau * (b - a))
-
-    def kde_cdf_smoothed(self, z_vals, alphas, tau):
-        z_vals = z_vals.unsqueeze(0)     # (1, N)
-        alphas = alphas.unsqueeze(1)     # (M, 1)
-        smoothed_indicators = torch.sigmoid(tau * (alphas - z_vals))  # (M, N)
-        return smoothed_indicators.mean(dim=1)  # Moyenne sur les N, résultat (M,)
-    
-    tau = 0.5
-    p = 1
-
-    def compute_loss_kde(self, dist, y, lamda):
-        sample_pred = self.sample(dist) #returns 256,100,4
-        pit_values = self.ensemble_PIT(sample_pred, y)[0] #4,256,1
-        phi_kde =self.kde_cdf_smoothed(pit_values, alphas, tau=tau)  # (M,)
-        reg_kde = (torch.abs(alphas - phi_kde) ** p).mean()
-        if self.hparams.loss == 'nll':
-            loss_term = -dist.log_prob(y).mean()
-            reg_loss = loss_term + (lamda * reg_kde)
-            return reg_loss, loss_term, lamda*reg_kde, reg_kde
-        elif self.hparams.loss == 'es':
-            loss_term = energy_score(dist, y, n_samples=self.hparams.es_num_samples)
-            reg_loss = loss_term + (lamda * reg_kde)
-            return reg_loss, loss_term, lamda*reg_kde, reg_kde
-
-    '''def compute_loss(self, dist, y):
-        if self.hparams.loss == 'nll':
-            self.validation_step_outputs.append(-dist.log_prob(y).mean()) 
-            return -dist.log_prob(y).mean()
-        elif self.hparams.loss == 'es':
-            self.validation_step_outputs.append(energy_score(dist, y, n_samples=self.hparams.es_num_samples))
-            return energy_score(dist, y, n_samples=self.hparams.es_num_samples)
-        else:
-            raise ValueError(f'Invalid loss: {self.hparams.loss}')'''
 
     def step(self, batch):
         x, y = batch
