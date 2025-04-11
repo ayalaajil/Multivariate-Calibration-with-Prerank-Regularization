@@ -17,11 +17,11 @@ def projected_pit(y, v, samples):
     pits = torch.searchsorted(sorted_samples, proj_y.unsqueeze(-1), side='right') / n #256,1
     return pits
 
-def calculate_PIT(self, y_hat, y):
+def calculate_PIT(y_hat, y):
     pca = PCA(n_components=len(y[0])) #keeping all components, 4 in this case
     pca.fit(y_hat.reshape(-1,len(y[0])))
     vectors = pca.components_ #4 by 4
-    pits = torch.stack([self.projected_pit(y, vectors[i], y_hat) for i in range(len(vectors))])
+    pits = torch.stack([projected_pit(y, vectors[i], y_hat) for i in range(len(vectors))])
     return pits, vectors
 
 def rqr_regularization(dist, y, k = 100, num_samples = 1000):

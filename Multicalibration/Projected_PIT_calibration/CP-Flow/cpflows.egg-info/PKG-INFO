@@ -1,0 +1,6 @@
+Metadata-Version: 2.1
+Name: cpflows
+Version: 0.1.0
+Summary: Convex Potential Flows package
+Author: CWHuang
+License-File: LICENSE

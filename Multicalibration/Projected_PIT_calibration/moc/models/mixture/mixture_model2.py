@@ -95,7 +95,7 @@ class MixtureLightningModule(LightningModule):
         num_layers: int = 3,
         loss: str = 'nll',
         reg_type: str = 'rqr',
-        mixture_size: int = 5,
+        mixture_size: int = 10,
         es_num_samples: int = 50,
         lr=1e-4,
     ):
@@ -319,7 +319,7 @@ class MixtureLightningModule(LightningModule):
     def step(self, batch):
         x, y = batch
         dist = self(x) #256 distributions in 4D
-        reg_loss, loss, lamda_rqr, rqr = self.compute_loss(dist, y, self.lambda_reg)
+        reg_loss, loss, lamda_rqr, rqr = self.compute_loss(dist, y)
         return reg_loss, loss, lamda_rqr, rqr
 
     def training_step(self, batch, batch_idx):
@@ -339,6 +339,9 @@ class MixtureLightningModule(LightningModule):
 
     def validation_step(self, batch, batch_idx):
         reg_loss, loss, lamda_rqr, rqr = self.step(batch)
+        reg_loss = reg_loss.unsqueeze(0) if reg_loss.dim() == 0 else reg_loss
+        print("reg_loss")
+        print(reg_loss)
         self.validation_step_outputs.append(reg_loss)
         '''wandb.log({"val_reg_loss": reg_loss.item(), "val_loss": loss.item(),
                    "val_lambda_rqr":lamda_rqr, "val_rqr": rqr})'''
