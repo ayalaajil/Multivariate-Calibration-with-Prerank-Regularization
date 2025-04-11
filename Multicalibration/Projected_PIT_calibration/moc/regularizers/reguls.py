@@ -17,11 +17,11 @@ def projected_pit(y, v, samples):
     pits = torch.searchsorted(sorted_samples, proj_y.unsqueeze(-1), side='right') / n #256,1
     return pits
 
-def calculate_PIT(self, y_hat, y):
+def calculate_PIT(y_hat, y):
     pca = PCA(n_components=len(y[0])) #keeping all components, 4 in this case
     pca.fit(y_hat.reshape(-1,len(y[0])))
     vectors = pca.components_ #4 by 4
-    pits = torch.stack([self.projected_pit(y, vectors[i], y_hat) for i in range(len(vectors))])
+    pits = torch.stack([projected_pit(y, vectors[i], y_hat) for i in range(len(vectors))])
     return pits, vectors
 
 def rqr_regularization(dist, y, k = 100, num_samples = 1000):
@@ -40,10 +40,10 @@ def rqr_regularization(dist, y, k = 100, num_samples = 1000):
             term = np.absolute(torch.log(((N + 1) / k) * (sorted_pits[j][i + k] - sorted_pits[j][i])))
             uni_rqr += term  # Weight proportional to the importance of the component ???
         rqr += uni_rqr/(N-k)                                    
-    return rqr/d #average over dimensions
+    return np.abs(rqr/d) #average over dimensions
 
 def compute_quantile(y_hat, alpha, vector):
-    proj_yhat = torch.matmul(y_hat, vector)
+    proj_yhat = torch.matmul(y_hat, vector) #(256,100)
     sorted_proj = torch.sort(proj_yhat, dim=1)[0]
     #print(sorted_proj[0])
 
@@ -52,7 +52,7 @@ def compute_quantile(y_hat, alpha, vector):
     quantile_index = int(alpha * n)-1 #90
 
     # Select the quantile value based on the sorted projections
-    quantile_values = sorted_proj[:, quantile_index, :] #256 values
+    quantile_values = sorted_proj[:, quantile_index] #256 values
     return quantile_values
     
 
@@ -68,9 +68,9 @@ def truncation_regularization(dist, y, num_samples = 1000, M = 100):
     for alpha in alphas:
         trunc_alpha_dim = 0.0
         for d in range(dim):
-            vector = torch.as_tensor(vectors[d], dtype=y.dtype, device=y.device)
+            vector = torch.as_tensor(vectors[d], dtype=y.dtype, device=y.device) #(4,1)
             quantiles = compute_quantile(y_hat, alpha, vector) #256
-            proj_y = torch.matmul(y, vector) #256,1
+            proj_y = torch.matmul(y, vector) #256
 
             F_hat_alpha = (proj_y <= quantiles).float().mean()  # scalar
             if F_hat_alpha < alpha:
