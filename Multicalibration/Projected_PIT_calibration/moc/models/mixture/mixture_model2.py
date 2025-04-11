@@ -95,7 +95,7 @@ class MixtureLightningModule(LightningModule):
         num_layers: int = 3,
         loss: str = 'nll',
         reg_type: str = 'rqr',
-        mixture_size: int = 5,
+        mixture_size: int = 10,
         es_num_samples: int = 50,
         lr=1e-4,
     ):
