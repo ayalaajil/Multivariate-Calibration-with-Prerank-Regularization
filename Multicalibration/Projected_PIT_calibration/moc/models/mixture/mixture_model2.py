@@ -101,7 +101,7 @@ class MixtureLightningModule(LightningModule):
     ):
         super().__init__()
         self.save_hyperparameters()
-        wandb.init(project="multicalibration", name=f"{reg_type}")
+        # wandb.init(project="multicalibration", name=f"{reg_type}")
 
         output_dim = output_dim
         mixture_size = self.hparams.mixture_size
@@ -167,26 +167,26 @@ class MixtureLightningModule(LightningModule):
 
     def training_step(self, batch, batch_idx):
         reg_loss, loss, reg = self.step(batch)
-        self.train_step_outputs.append({
-            "reg_loss": reg_loss.detach(),
-            "loss": loss.detach(),
-            "reg": reg if isinstance(reg, float) else reg.detach(),
-        })
+        # self.train_step_outputs.append({
+        #     "reg_loss": reg_loss.detach(),
+        #     "loss": loss.detach(),
+        #     "reg": reg if isinstance(reg, float) else reg.detach(),
+        # })
         return reg_loss
     
-    def on_train_epoch_end(self):
-        reg_losses = torch.stack([x["reg_loss"] for x in self.train_step_outputs])
-        losses = torch.stack([x["loss"] for x in self.train_step_outputs])
-        regs = torch.stack([x["reg"] for x in self.train_step_outputs])
+    # def on_train_epoch_end(self):
+    #     reg_losses = torch.stack([x["reg_loss"] for x in self.train_step_outputs])
+    #     losses = torch.stack([x["loss"] for x in self.train_step_outputs])
+    #     regs = torch.stack([x["reg"] for x in self.train_step_outputs])
 
-        wandb.log({
-            "train_reg_loss": reg_losses.mean().item(),
-            "train_loss": losses.mean().item(),
-            "train_reg": regs.mean().item(),
-            "epoch": self.current_epoch
-        })
+    #     wandb.log({
+    #         "train_reg_loss": reg_losses.mean().item(),
+    #         "train_loss": losses.mean().item(),
+    #         "train_reg": regs.mean().item(),
+    #         "epoch": self.current_epoch
+    #     })
 
-        self.train_step_outputs.clear()  # Clear for next epoch
+    #     self.train_step_outputs.clear()  # Clear for next epoch
         
 
     def validation_step(self, batch, batch_idx):
@@ -198,26 +198,26 @@ class MixtureLightningModule(LightningModule):
             on_epoch=True,
             prog_bar=True,
         )
-        self.validation_step_outputs.append({
-            "reg_loss": reg_loss.detach(),
-            "loss": loss.detach(),
-            "reg": reg if isinstance(reg, float) else reg.detach(),
-            })
+        # self.validation_step_outputs.append({
+        #     "reg_loss": reg_loss.detach(),
+        #     "loss": loss.detach(),
+        #     "reg": reg if isinstance(reg, float) else reg.detach(),
+        #     })
         return reg_loss
     
-    def on_validation_epoch_end(self):
-        reg_losses = torch.stack([x["reg_loss"] for x in self.validation_step_outputs])
-        losses = torch.stack([x["loss"] for x in self.validation_step_outputs])
-        regs = torch.stack([x["reg"] for x in self.validation_step_outputs])
+    # def on_validation_epoch_end(self):
+    #     reg_losses = torch.stack([x["reg_loss"] for x in self.validation_step_outputs])
+    #     losses = torch.stack([x["loss"] for x in self.validation_step_outputs])
+    #     regs = torch.stack([x["reg"] for x in self.validation_step_outputs])
 
-        wandb.log({
-            "val_reg_loss": reg_losses.mean().item(),
-            "val_loss": losses.mean().item(),
-            "val_reg": regs.mean().item(),
-            "epoch": self.current_epoch
-        })
+    #     wandb.log({
+    #         "val_reg_loss": reg_losses.mean().item(),
+    #         "val_loss": losses.mean().item(),
+    #         "val_reg": regs.mean().item(),
+    #         "epoch": self.current_epoch
+    #     })
 
-        self.validation_step_outputs.clear()  # Clear for next epoch
+    #     self.validation_step_outputs.clear()  # Clear for next epoch
 
     def configure_optimizers(self):
         return torch.optim.Adam(params=self.parameters(), lr=self.hparams.lr)
