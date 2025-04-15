@@ -9,7 +9,7 @@ import wandb
 import numpy as np
 import sys
 from pathlib import Path
-from moc.metrics.distribution_metrics import energy_score
+from moc.metrics.distribution_metrics import energy_score, multivariate_energy_score
 
 reg_path = Path(__file__).resolve().parents[2]
 sys.path.append(str(reg_path))
@@ -96,7 +96,7 @@ class MixtureLightningModule(LightningModule):
         loss: str = 'nll',
         reg_type: str = 'rqr',
         mixture_size: int = 10,
-        es_num_samples: int = 50,
+        es_num_samples: int = 100,
         lr=1e-4,
     ):
         super().__init__()
@@ -153,7 +153,7 @@ class MixtureLightningModule(LightningModule):
             reg_loss = loss_term + (self.lambda_reg * reg_term)
             return reg_loss, loss_term, reg_term
         elif self.hparams.loss == 'es':
-            loss_term = energy_score(dist, y, n_samples=self.hparams.es_num_samples)
+            loss_term = multivariate_energy_score(dist, y, n_samples=self.hparams.es_num_samples).mean()
             reg_loss = loss_term + (self.lambda_reg * reg_term)
             return reg_loss, loss_term, reg_term
         else:

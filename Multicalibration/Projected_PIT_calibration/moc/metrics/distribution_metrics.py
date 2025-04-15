@@ -22,14 +22,14 @@ def kernel_score_from_samples(y, s1, s2, kernel):
     first_term = kernel(
         s1.unsqueeze(-3),
         s2.unsqueeze(-4),
-    ).mean(dim=(-3, -2))
+    ).mean(dim=(-3, -2)) #has shape (256,)
 
     second_term = kernel(
         s1,
         y.unsqueeze(-3),
-    ).mean(dim=-2)
+    ).mean(dim=-2) #has shape (256,)
 
-    return 0.5 * first_term - second_term
+    return 0.5 * first_term - second_term #has shape (256,)
 
 
 def energy_score_from_samples(y, s1, s2, beta):
@@ -50,3 +50,17 @@ def energy_score(dist, y, n_samples=100, beta=2., rsample=False):
     s1 = sample(dist, (n_samples,), rsample)
     s2 = sample(dist, (n_samples,), rsample)
     return energy_score_from_samples(y, s1, s2, beta)
+
+def multivariate_energy_score(dist, y, n_samples = 100):
+
+    s1 = dist.sample((n_samples,)).permute(1, 0, 2) #256, 100, 16
+    s2 = dist.sample((n_samples,)).permute(1, 0, 2) # 256, 100, 16
+
+    y_expanded = y.unsqueeze(1)  # (256, 1, 16)
+    term1 = torch.linalg.vector_norm(s1 - y_expanded, dim=-1).mean(dim=1)  # (256,)
+
+    # Second term: 0.5 * E[||X - X'||]
+    pairwise_dists = torch.linalg.vector_norm(s1.unsqueeze(2) - s2.unsqueeze(1), dim=-1)  # (256, 100, 100)
+    term2 = 0.5 * pairwise_dists.mean(dim=(1, 2))  # (256,)
+
+    return (term1 - term2).mean()  # (256,)
