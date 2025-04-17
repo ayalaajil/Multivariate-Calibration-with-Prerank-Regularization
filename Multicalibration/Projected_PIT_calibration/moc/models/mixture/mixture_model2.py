@@ -9,7 +9,7 @@ import wandb
 import numpy as np
 import sys
 from pathlib import Path
-from moc.metrics.distribution_metrics import energy_score, multivariate_energy_score
+from moc.metrics.distribution_metrics import multivariate_energy_score, pce
 
 reg_path = Path(__file__).resolve().parents[2]
 sys.path.append(str(reg_path))
@@ -90,7 +90,7 @@ class MixtureLightningModule(LightningModule):
         self,
         input_dim: int,
         output_dim: int,
-        lambda_reg:float,
+        lambda_reg:float = 0.0,
         hidden_size: int = 100,
         num_layers: int = 3,
         loss: str = 'nll',
@@ -101,7 +101,7 @@ class MixtureLightningModule(LightningModule):
     ):
         super().__init__()
         self.save_hyperparameters()
-        # wandb.init(project="multicalibration", name=f"{reg_type}")
+        # wandb.init(project="multicalibration")
 
         output_dim = output_dim
         mixture_size = self.hparams.mixture_size
@@ -135,89 +135,123 @@ class MixtureLightningModule(LightningModule):
     def predict(self, x):
         return self(x)
 
-    def compute_loss(self, dist, y): #with rqr
-        """
-        Compute the loss with the added regularization term based on PIT values.
-        """
+    def compute_loss(self, dist, y):
+
+        reg_val = 0.0  # raw reg
+        reg_term = 0.0  # scaled reg
         if self.reg_type == 'rqr':
-            reg_term = rqr_regularization(dist, y)
+            reg_val = rqr_regularization(dist, y)
         elif self.reg_type == 'truncation':
-            reg_term = truncation_regularization(dist, y)
+            reg_val = truncation_regularization(dist, y)
         elif self.reg_type == 'pce-kde':
-            reg_term = pce_kde_regularization(dist, y)
-        else:
-            reg_term = 0.0
-        
+            reg_val = pce_kde_regularization(dist, y)
+
         if self.hparams.loss == 'nll':
             loss_term = -dist.log_prob(y).mean()
-            reg_loss = loss_term + (self.lambda_reg * reg_term)
-            return reg_loss, loss_term, reg_term
         elif self.hparams.loss == 'es':
             loss_term = multivariate_energy_score(dist, y, n_samples=self.hparams.es_num_samples).mean()
-            reg_loss = loss_term + (self.lambda_reg * reg_term)
-            return reg_loss, loss_term, reg_term
         else:
             raise ValueError(f'Invalid loss: {self.hparams.loss}')
-    
+
+        pce_score = pce(dist, y) #return a list of d elements
+
+        reg_term = self.lambda_reg * reg_val
+        total_loss = loss_term + reg_term
+
+        return total_loss, reg_val, pce_score
+
+
     def step(self, batch):
         x, y = batch
         dist = self(x) #256 distributions in 4D
-        reg_loss, loss, reg = self.compute_loss(dist, y)
-        return reg_loss, loss, reg
+        total_loss, raw_reg, pce_score = self.compute_loss(dist, y)
+        return total_loss, raw_reg, pce_score
 
     def training_step(self, batch, batch_idx):
-        reg_loss, loss, reg = self.step(batch)
+        total_loss, raw_reg, pce_score = self.step(batch)
         # self.train_step_outputs.append({
-        #     "reg_loss": reg_loss.detach(),
-        #     "loss": loss.detach(),
-        #     "reg": reg if isinstance(reg, float) else reg.detach(),
+        #     "total_loss": total_loss.detach(),
+        #     "raw_reg": raw_reg, #float
+        #     "pce-score": pce_score, #a list
         # })
-        return reg_loss
+        return total_loss
     
     # def on_train_epoch_end(self):
-    #     reg_losses = torch.stack([x["reg_loss"] for x in self.train_step_outputs])
-    #     losses = torch.stack([x["loss"] for x in self.train_step_outputs])
-    #     regs = torch.stack([x["reg"] for x in self.train_step_outputs])
+    #     total_losses = []
+    #     raw_regs = []
+    #     pce_scores = []
 
-    #     wandb.log({
-    #         "train_reg_loss": reg_losses.mean().item(),
-    #         "train_loss": losses.mean().item(),
-    #         "train_reg": regs.mean().item(),
-    #         "epoch": self.current_epoch
-    #     })
+    #     for out in self.train_step_outputs:
+    #         total_losses.append(float(out["total_loss"]))
+    #         raw_regs.append(float(out["raw_reg"]))
+    #         pce_scores.append(np.array(out["pce-score"]))  # shape: (d,)
 
-    #     self.train_step_outputs.clear()  # Clear for next epoch
+    #     avg_total_loss = np.mean(total_losses)
+    #     avg_raw_reg = np.mean(raw_regs)
+    #     avg_pce_score = np.mean(pce_scores, axis=0)  # shape: (d,)
+
+    #     # Build log dictionary
+    #     log_dict = {
+    #         "train/total_loss": avg_total_loss,
+    #         "train/raw_reg": avg_raw_reg,
+    #     }
+
+    #     # Add each dimension of the PCE score
+    #     for i, val in enumerate(avg_pce_score):
+    #         log_dict[f"train/pce_dim_{i+1}"] = val
+
+    #     # Log to W&B
+    #     wandb.log(log_dict)
+
+    #     # Clear for next epoch
+    #     self.train_step_outputs.clear()
         
 
     def validation_step(self, batch, batch_idx):
-        reg_loss, loss, reg = self.step(batch)
+        total_loss, raw_reg, pce_score = self.step(batch)
         self.log(
             f'val/loss',
-            reg_loss,
+            total_loss,
             on_step=False,
             on_epoch=True,
             prog_bar=True,
         )
         # self.validation_step_outputs.append({
-        #     "reg_loss": reg_loss.detach(),
-        #     "loss": loss.detach(),
-        #     "reg": reg if isinstance(reg, float) else reg.detach(),
-        #     })
-        return reg_loss
+        #     "total_loss": total_loss.detach(),
+        #     "raw_reg": raw_reg,
+        #     "pce-score": pce_score,
+        # })
+        return total_loss
     
     # def on_validation_epoch_end(self):
-    #     reg_losses = torch.stack([x["reg_loss"] for x in self.validation_step_outputs])
-    #     losses = torch.stack([x["loss"] for x in self.validation_step_outputs])
-    #     regs = torch.stack([x["reg"] for x in self.validation_step_outputs])
+    #     total_losses = []
+    #     raw_regs = []
+    #     pce_scores = []
 
-    #     wandb.log({
-    #         "val_reg_loss": reg_losses.mean().item(),
-    #         "val_loss": losses.mean().item(),
-    #         "val_reg": regs.mean().item(),
-    #         "epoch": self.current_epoch
-    #     })
+    #     for out in self.validation_step_outputs:
+    #         total_losses.append(float(out["total_loss"]))
+    #         raw_regs.append(float(out["raw_reg"]))
+    #         pce_scores.append(np.array(out["pce-score"]))
 
-    #     self.validation_step_outputs.clear()  # Clear for next epoch
+    #     avg_total_loss = np.mean(total_losses)
+    #     avg_raw_reg = np.mean(raw_regs)
+    #     avg_pce_score = np.mean(pce_scores, axis=0)
+
+    #     # Build log dictionary
+    #     log_dict = {
+    #         "val/total_loss": avg_total_loss,
+    #         "val/raw_reg": avg_raw_reg,
+    #     }
+
+    #     # Add each dimension of the PCE score
+    #     for i, val in enumerate(avg_pce_score):
+    #         log_dict[f"val/pce_dim_{i+1}"] = val
+
+    #     # Log to W&B
+    #     wandb.log(log_dict)
+
+    #     # Clear for next epoch
+    #     self.validation_step_outputs.clear()
 
     def configure_optimizers(self):
         return torch.optim.Adam(params=self.parameters(), lr=self.hparams.lr)

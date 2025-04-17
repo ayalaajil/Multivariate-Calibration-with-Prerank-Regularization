@@ -42,22 +42,23 @@ def rqr_regularization(dist, y, k = 100, num_samples = 1000):
         rqr += uni_rqr/(N-k)                                    
     return np.abs(rqr/d) #average over dimensions
 
-def compute_quantile(y_hat, alpha, vector):
-    proj_yhat = torch.matmul(y_hat, vector) #(256,100)
+def compute_quantile(y_hat, alphas, vector):
+    proj_yhat = torch.matmul(y_hat, vector) #(256,1000)
     sorted_proj = torch.sort(proj_yhat, dim=1)[0]
     #print(sorted_proj[0])
 
     # Compute the index of the quantile for each sample
-    n = sorted_proj.shape[1]  # Number of samples i.e. 100
-    quantile_index = int(alpha * n)-1 #90
+    n = sorted_proj.shape[1]  # Number of samples i.e. 1000
+    alpha_idxs = (alphas * n).long() - 1
+    alpha_idxs = torch.clamp(alpha_idxs, min=0)  # to avoid -1
 
     # Select the quantile value based on the sorted projections
-    quantile_values = sorted_proj[:, quantile_index] #256 values
+    quantile_values = sorted_proj[:, alpha_idxs] #256,100 values
     return quantile_values
     
 
 def truncation_regularization(dist, y, num_samples = 1000, M = 100):
-    y_hat = dist.sample((num_samples,)).permute(1, 0, 2) 
+    y_hat = dist.sample((num_samples,)).permute(1, 0, 2) #256,1000,4
     pca = PCA(n_components=y.shape[1]) #keeping all components, 4 in this case
     pca.fit(y_hat.reshape(-1,y.shape[1]))
     vectors = pca.components_
@@ -65,35 +66,43 @@ def truncation_regularization(dist, y, num_samples = 1000, M = 100):
     alphas = torch.linspace(0, 1, M, device=y_hat.device)
     dim = y.shape[1]
     trunc_total = 0.0
-    for alpha in alphas:
-        trunc_alpha_dim = 0.0
-        for d in range(dim):
-            vector = torch.as_tensor(vectors[d], dtype=y.dtype, device=y.device) #(4,1)
-            quantiles = compute_quantile(y_hat, alpha, vector) #256
-            proj_y = torch.matmul(y, vector) #256
+    for d in range(dim):
+        vector = torch.as_tensor(vectors[d], dtype=y.dtype, device=y.device) #4,1
+        proj_y = torch.matmul(y, vector) #256,1
+        quantiles = compute_quantile(y_hat, alphas, vector) #256,100
+        # Broadcast y_proj for comparison
+        y_proj_exp = proj_y.unsqueeze(1)  # (256, 1)
+        F_hat = (y_proj_exp <= quantiles).float().mean(dim=0)  # (100,)
 
-            F_hat_alpha = (proj_y <= quantiles).float().mean()  # scalar
-            if F_hat_alpha < alpha:
-                    rho = (proj_y - quantiles) * (quantiles < proj_y)
-            else:
-                    rho = (quantiles - proj_y) * (proj_y < quantiles)
-            trunc_alpha_dim += rho.mean()
-        trunc_total += trunc_alpha_dim / dim
-    return trunc_total / M
+        # Compute rho for all alphas
+        diff = y_proj_exp - quantiles  # (256, 100)
+        rho = torch.where(F_hat < alphas,
+                          diff * (diff > 0),
+                          -diff * (diff < 0))  # (256, 100)
+
+        trunc_alpha = rho.mean(dim=0).mean()  # scalar
+        trunc_total += trunc_alpha
+
+    return trunc_total / dim
 
 def pce_kde_regularization(dist, y, num_samples = 1000, M = 100, tau = 100, p = 1):
-    y_hat = dist.sample((num_samples,)).permute(1, 0, 2) # (256,100,4)
-    pit_values = calculate_PIT(y_hat, y)[0] # (4,256,1)
-    alphas = torch.linspace(0, 1, M, device=y_hat.device)
+    y_hat = dist.sample((num_samples,)).permute(1, 0, 2)  # (256, 1000, 4)
+    pit_values = calculate_PIT(y_hat, y)[0]  # (4, 256, 1)
+    alphas = torch.linspace(0, 1, M, device=y_hat.device)  # (100,)
     dim = y.shape[1]
+
     pce_kde = 0.0
-    for alpha in alphas:
-        phi_kde_dim = 0.0
-        for d in range(dim):
-            phi_kde = torch.sigmoid(tau * (alpha - pit_values[d,:,:])).mean()
-            phi_kde_dim += phi_kde
-        pce_kde += torch.abs(alpha - phi_kde_dim/dim)**p
-    return pce_kde/M
+    for d in range(dim):
+        # Expand for broadcasting
+        pit_d = pit_values[d]  # (256, 1)
+        pit_exp = pit_d.expand(-1, M)  # (256, 100)
+        alphas_exp = alphas.view(1, M)  # (1, 100)
+
+        # Compute phi_kde for all alphas at once
+        phi_kde = torch.sigmoid(tau * (alphas_exp - pit_exp)).mean(dim=0)  # (100,)
+        pce_kde += torch.abs(alphas - phi_kde).pow(p).mean()
+
+    return pce_kde / dim
     
     
 

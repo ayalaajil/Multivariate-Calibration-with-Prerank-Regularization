@@ -72,7 +72,7 @@ def pce_per_dataset(config, data_group, data_name, seeds):
     return pce_over_seeds
 
 dataset_names = [
-                #  ['camehl', 'households'],
+                 ['camehl', 'households'],
                 #  ['mulan', 'scm20d'],
                 #  ['mulan', 'rf2'],
                 #  ['mulan', 'rf1'],
@@ -83,10 +83,11 @@ dataset_names = [
                 #  ['feldman', 'house'],
                 #  ['feldman', 'bio'],
                 #  ['feldman', 'blog_data'],
-                 ['del_barrio', 'calcofi'],
-                 ['wang', 'taxi']
+                #  ['del_barrio', 'calcofi'],
+                #  ['wang', 'taxi']
                  ]
-seeds = [0, 42, 866, 12, 4]
+# seeds = [0, 42, 866, 12, 4]
+seeds = [42]
 pces_across_datasets = {}
 
 for dataset in dataset_names:
@@ -95,6 +96,6 @@ for dataset in dataset_names:
     pce_over_seeds = pce_per_dataset(config, data_group, data_name, seeds)
     pces_across_datasets[f'{data_name}'] = np.array(pce_over_seeds)
 
-    with open("pce_calcofi_taxi.pkl", "wb") as f:
-        pickle.dump(pces_across_datasets, f)
+    # with open("pce_calcofi_taxi.pkl", "wb") as f:
+    #     pickle.dump(pces_across_datasets, f)
 

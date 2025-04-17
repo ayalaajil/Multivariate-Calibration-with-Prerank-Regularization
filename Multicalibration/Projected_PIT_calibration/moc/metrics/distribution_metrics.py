@@ -1,5 +1,5 @@
 import torch
-
+from sklearn.decomposition import PCA
 
 def nll(model, x, y):
     dist = model.predict(x)
@@ -64,3 +64,35 @@ def multivariate_energy_score(dist, y, n_samples = 100):
     term2 = 0.5 * pairwise_dists.mean(dim=(1, 2))  # (256,)
 
     return (term1 - term2).mean()  # (256,)
+
+def ensemble_PIT(samples, y):
+    pca = PCA(n_components=y.shape[1]) #keeping all components, 4 in this case
+    pca.fit(samples.reshape(-1,y.shape[1]))
+    vectors = pca.components_ #4 by 4
+    # explained_var = pca.explained_variance_ #array of len 4
+    pits = []
+    for i in range(len(vectors)):
+        u = torch.as_tensor(vectors[i], dtype=samples.dtype, device=samples.device)
+        sample_proj = torch.matmul(samples, u) # 256,100,1
+        y_proj = torch.matmul(y, u) #256,1
+        sample_sorted = torch.sort(sample_proj)[0] #256,100 sort across the columns
+        n = samples.shape[1] #100
+        cdf_values = torch.searchsorted(sample_sorted, y_proj.unsqueeze(-1), side='right') / n #256,1
+        pits.append(cdf_values)
+    return torch.stack(pits)
+
+def pce(dist, y, n_samples = 100, alphas = torch.linspace(0, 1, 100), mode = 'all'):
+    samples = dist.sample((n_samples,)).permute(1, 0, 2) #256,100,4
+    pit_values = ensemble_PIT(samples, y) #shape (4,256,1)
+    dim = pit_values.shape[0]
+    pces = []
+    for d in range(dim):
+        pits = pit_values[d].view(-1)  # shape: (256,)
+        pits_sorted = pits.sort()[0]
+        cdf_estimates = torch.searchsorted(pits_sorted, alphas, side='right') / pits_sorted.numel() #100
+        pce = torch.mean(torch.abs(cdf_estimates - alphas)).item()
+        pces.append(pce)
+    if mode == 'average':
+        return sum(pces)/len(pces)
+    elif mode == 'all':
+        return pces #it returns a list with 4 values, pce corresponding to each PCA
