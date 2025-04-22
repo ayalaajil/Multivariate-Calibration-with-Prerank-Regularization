@@ -1,5 +1,6 @@
 import torch
 from sklearn.decomposition import PCA
+from .preranks import get_prerank
 
 def nll(model, x, y):
     dist = model.predict(x)
@@ -67,33 +68,42 @@ def multivariate_energy_score(dist, y, n_samples = 100):
 
 def calculate_PIT(samples, y, prerank):
     pits = []
-    n = samples.shape[1]
+    M = samples.shape[1]
     dim = y.shape[1]
-    if prerank == 'identity':
+    if prerank in ['mean', 'variance', 'dependency']:
+        y_proj, samples_proj = get_prerank(y, samples, prerank)
+        sorted_samples_proj = torch.sort(samples_proj, dim=1)[0] #256,100
+        cdfs = torch.searchsorted(sorted_samples_proj, y_proj.unsqueeze(-1), side='right') / M #256,1
+        pits.append(cdfs)
+    elif prerank == 'identity':
         for d in range(dim):
             dsample = samples[:,:,d] #256,100
-            dy = y[:,d] #256,1
-            dsample_sorted = torch.sort(dsample)[0]
-            cdfs = torch.searchsorted(dsample_sorted, dy.unsqueeze(-1), side='right') / n #256,1
+            dy = y[:,d] #256
+            dsample_sorted = torch.sort(dsample, dim=1)[0]
+            cdfs = torch.searchsorted(dsample_sorted.contiguous(), 
+                                      dy.unsqueeze(-1).contiguous(), side='right') / M #256,1
             pits.append(cdfs)
     elif prerank == 'pca':
         pca = PCA(n_components=dim) #keeping all components, 4 in this case
-        pca.fit(samples.reshape(-1,dim))
+        pca.fit(samples.reshape(-1,dim)) #this will not work in gpu
         vectors = pca.components_ #4 by 4
         # explained_var = pca.explained_variance_ #array of len 4
-        for i in range(dim):
-            u = torch.as_tensor(vectors[i], dtype=samples.dtype, device=samples.device)
+        for d in range(dim):
+            u = torch.as_tensor(vectors[d], dtype=samples.dtype, device=samples.device)
             sample_proj = torch.matmul(samples, u) # 256,100,1
             y_proj = torch.matmul(y, u) #256,1
-            sample_sorted = torch.sort(sample_proj)[0] #256,100 sort across the columns
-            cdf_values = torch.searchsorted(sample_sorted, y_proj.unsqueeze(-1), side='right') / n #256,1
-            pits.append(cdf_values)
+            sample_sorted = torch.sort(sample_proj, dim=1)[0] #256,100 sort across the columns
+            cdfs = torch.searchsorted(sample_sorted.contiguous(), 
+                                      y_proj.unsqueeze(-1).contiguous(), side='right') / M #256,1
+            pits.append(cdfs)
+    else:
+        raise ValueError(f"Unknown prerank function: {prerank}")
     return torch.stack(pits)
 
 
 def pce(dist, y, n_samples = 100, alphas = torch.linspace(0, 1, 100), mode = 'all', prerank = 'pca'):
     samples = dist.sample((n_samples,)).permute(1, 0, 2) #256,100,4
-    pit_values = calculate_PIT(samples, y, prerank = prerank) #shape (4,256,1)
+    pit_values = calculate_PIT(samples, y, prerank = prerank) #shape (4,256,1) or (1, 256,1)
     dim = pit_values.shape[0]
     pces = []
     for d in range(dim):

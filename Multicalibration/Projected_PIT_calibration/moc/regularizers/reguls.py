@@ -37,10 +37,10 @@ def rqr_regularization(dist, y, k = 100, num_samples = 1000):
     for j in range(d): #loop over dimensions 4
         uni_rqr = 0.0
         for i in range(N - k):
-            term = np.absolute(torch.log(((N + 1) / k) * (sorted_pits[j][i + k] - sorted_pits[j][i])))
+            term = torch.abs(torch.log(((N + 1) / k) * (sorted_pits[j][i + k] - sorted_pits[j][i])))
             uni_rqr += term  # Weight proportional to the importance of the component ???
         rqr += uni_rqr/(N-k)                                    
-    return np.abs(rqr/d) #average over dimensions
+    return rqr/d #average over dimensions
 
 def compute_quantile(y_hat, alphas, vector):
     proj_yhat = torch.matmul(y_hat, vector) #(256,1000)
