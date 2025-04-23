@@ -75,7 +75,7 @@ def calculate_PIT(samples, y, prerank):
         sorted_samples_proj = torch.sort(samples_proj, dim=1)[0] #256,100
         cdfs = torch.searchsorted(sorted_samples_proj, y_proj.unsqueeze(-1), side='right') / M #256,1
         pits.append(cdfs)
-    elif prerank == 'identity':
+    elif prerank == 'marginal':
         for d in range(dim):
             dsample = samples[:,:,d] #256,100
             dy = y[:,d] #256
@@ -101,8 +101,11 @@ def calculate_PIT(samples, y, prerank):
     return torch.stack(pits)
 
 
-def pce(dist, y, n_samples = 100, alphas = torch.linspace(0, 1, 100), mode = 'all', prerank = 'pca'):
-    samples = dist.sample((n_samples,)).permute(1, 0, 2) #256,100,4
+def pce(dist, y, n_samples = 100, alphas = torch.linspace(0, 1, 100), mode = 'all', prerank = 'pca', setup = 'real'):
+    if setup=='simulated':
+        samples = dist.sample((y.shape[0] * n_samples,)).reshape(y.shape[0], n_samples, -1)
+    else:
+        samples = dist.sample((n_samples,)).permute(1, 0, 2) #256,100,4
     pit_values = calculate_PIT(samples, y, prerank = prerank) #shape (4,256,1) or (1, 256,1)
     dim = pit_values.shape[0]
     pces = []
