@@ -12,7 +12,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 import torch
 
 config = get_config()
-config.device = 'cpu'
+config.device = 'cuda'
 M = 100
 alphas = torch.linspace(0, 1, M, device=config.device)
 
@@ -21,21 +21,25 @@ def plot_pit_per_dataset(config, prerank, data_group, data_name):
     seed= 42
     datamodule = RealDataModule(rc, seed=seed)
     p, q = datamodule.input_dim, datamodule.output_dim
-    model = MixtureLightningModule(p,q)
+    model = MixtureLightningModule(p, q)
     #model = MQF2LightningModule(p, q)
     trainer = get_lightning_trainer(rc)
     trainer.fit(model, datamodule)
+    model.to(config.device)
+    model.eval()
 
     total_pits = []
-    for x, y in datamodule.test_dataloader():
-        x = x.to(config.device)
-        y = y.to(config.device)
-        dist = model.predict(x)
-        samples = dist.sample((100,)).permute(1, 0, 2) #256,100,4
-        c = min(y.shape[1], 3)
-        pit_values = calculate_PIT(samples, y, prerank) 
-        total_pits.append(pit_values)
-    total_pits = torch.cat(total_pits, dim=1) #shape (n_components, number of test data points, 1)
+    with torch.no_grad():
+        for x, y in datamodule.test_dataloader():
+            x = x.to(config.device)
+            y = y.to(config.device)
+            dist = model.predict(x)
+            samples = dist.sample((100,)).permute(1, 0, 2) #256,100,4
+            c = min(y.shape[1], 3)
+            pit_values = calculate_PIT(samples, y, prerank) 
+            total_pits.append(pit_values)
+    total_pits = torch.cat(total_pits, dim=1)
+    total_pits_np = total_pits.detach().cpu().numpy() #shape (n_components, number of test data points, 1)
 
     dimension =  len(pit_values)
     cols = 3  # Fixes 3 plots per row
@@ -50,7 +54,7 @@ def plot_pit_per_dataset(config, prerank, data_group, data_name):
         row, col = divmod(i, cols)  # Find the position in the grid
         ax = axs[row, col]  # Get the corresponding axis
         
-        ax.hist(total_pits[i], bins=10, density=True, alpha=0.6, color='g')
+        ax.hist(total_pits_np[i], bins=10, density=True, alpha=0.6, color='g')
         title = f"PIT - Direction according to component ${i+1}$" 
         ax.set_title(title)
         ax.set_xlabel("Projected PIT Value")
@@ -62,7 +66,8 @@ def plot_pit_per_dataset(config, prerank, data_group, data_name):
 
     plt.tight_layout()  # Automatically adjust the display
     filename = f"PIT_proj_{data_group}_{data_name}.png"
-    plt.tight_layout()
+    fig.suptitle(f"PIT histograms for {data_group}/{data_name} using prerank: {prerank}", fontsize=16)
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
     return fig
 
 def plots_per_method(config, method_name):
@@ -102,8 +107,9 @@ def plots_per_method(config, method_name):
                     plt.close(fig)
 
 def plots(config):
-    methods= ["axes", "PCA", "prerank"]
+    methods= ["marginal", "PCA", "prerank"]
     for method in methods:
+        print(f"Working with method {method}")
         plots_per_method(config, method)
 
 plots(config)

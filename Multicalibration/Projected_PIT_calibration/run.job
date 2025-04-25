@@ -1,0 +1,11 @@
+#!/bin/bash
+#
+#SBATCH --job-name=plotting-PIT3
+#SBATCH --output=plotting-PIT3.out
+#
+#SBATCH --cpus-per-task=10
+#SBATCH --gres=gpu:1
+
+
+srun python -u plotting-PIT.py
+
