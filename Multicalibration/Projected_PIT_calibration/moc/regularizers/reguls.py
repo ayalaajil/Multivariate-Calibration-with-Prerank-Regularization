@@ -1,46 +1,43 @@
 import torch
-from lightning.pytorch import LightningModule
-from torch.distributions import MixtureSameFamily, Categorical, MultivariateNormal
-import math
 from sklearn.decomposition import PCA
 import numpy as np
 
 
-def projected_pit(y, v, samples):
-    v = torch.as_tensor(v, dtype=samples.dtype, device=samples.device)
-    proj_samples = torch.matmul(samples, v)
-    # if x_values is None:
-    #     x_values = sample
-    proj_y = torch.matmul(y, v)
-    sorted_samples = torch.sort(proj_samples)[0] #256,100 sort across the columns
-    n = samples.shape[1] #100 or 1000
-    pits = torch.searchsorted(sorted_samples, proj_y.unsqueeze(-1), side='right') / n #256,1
-    return pits
+# def projected_pit(y, v, samples):
+#     v = torch.as_tensor(v, dtype=samples.dtype, device=samples.device)
+#     proj_samples = torch.matmul(samples, v)
+#     # if x_values is None:
+#     #     x_values = sample
+#     proj_y = torch.matmul(y, v)
+#     sorted_samples = torch.sort(proj_samples)[0] #256,100 sort across the columns
+#     n = samples.shape[1] #100 or 1000
+#     pits = torch.searchsorted(sorted_samples, proj_y.unsqueeze(-1), side='right') / n #256,1
+#     return pits
 
-def calculate_PIT(y_hat, y):
-    pca = PCA(n_components=len(y[0])) #keeping all components, 4 in this case
-    pca.fit(y_hat.reshape(-1,len(y[0])))
-    vectors = pca.components_ #4 by 4
-    pits = torch.stack([projected_pit(y, vectors[i], y_hat) for i in range(len(vectors))])
-    return pits, vectors
+# def calculate_PIT(y_hat, y):
+#     pca = PCA(n_components=len(y[0])) #keeping all components, 4 in this case
+#     pca.fit(y_hat.reshape(-1,len(y[0])))
+#     vectors = pca.components_ #4 by 4
+#     pits = torch.stack([projected_pit(y, vectors[i], y_hat) for i in range(len(vectors))])
+#     return pits, vectors
 
-def rqr_regularization(dist, y, k = 100, num_samples = 1000):
+# def rqr_regularization(dist, y, k = 100, num_samples = 1000):
         
-    samples = dist.sample((num_samples,)).permute(1, 0, 2) #256,100,4
-    pit_values = calculate_PIT(samples, y)[0]
-    # Sort the PIT values if necessary (sorting might depend on the context)
-    sorted_pits = torch.sort(pit_values, dim=1)[0]# Sort the PIT values
+#     samples = dist.sample((num_samples,)).permute(1, 0, 2) #256,100,4
+#     pit_values = calculate_PIT(samples, y)[0]
+#     # Sort the PIT values if necessary (sorting might depend on the context)
+#     sorted_pits = torch.sort(pit_values, dim=1)[0]# Sort the PIT values
 
-    # Calculate the regularization term
-    rqr = 0
-    N, d = y.shape[0], y.shape[1]
-    for j in range(d): #loop over dimensions 4
-        uni_rqr = 0.0
-        for i in range(N - k):
-            term = torch.abs(torch.log(((N + 1) / k) * (sorted_pits[j][i + k] - sorted_pits[j][i])))
-            uni_rqr += term  # Weight proportional to the importance of the component ???
-        rqr += uni_rqr/(N-k)                                    
-    return rqr/d #average over dimensions
+#     # Calculate the regularization term
+#     rqr = 0
+#     N, d = y.shape[0], y.shape[1]
+#     for j in range(d): #loop over dimensions 4
+#         uni_rqr = 0.0
+#         for i in range(N - k):
+#             term = torch.abs(torch.log(((N + 1) / k) * (sorted_pits[j][i + k] - sorted_pits[j][i])))
+#             uni_rqr += term  # Weight proportional to the importance of the component ???
+#         rqr += uni_rqr/(N-k)                                    
+#     return rqr/d #average over dimensions
 
 def compute_quantile(y_hat, alphas, vector):
     proj_yhat = torch.matmul(y_hat, vector) #(256,1000)
