@@ -88,6 +88,9 @@ def calculate_PIT(samples, y, prerank):
         pca = PCA(n_components=dim) #keeping all components, 4 in this case
         pca.fit(samples_np) #this will not work in gpu
         vectors = torch.tensor(pca.components_, dtype=samples.dtype, device=samples.device)
+        samples_np = samples.detach().cpu().numpy().reshape(-1, y.shape[1])
+        pca.fit(samples_np) #this will not work in gpu
+        vectors = torch.tensor(pca.components_, dtype=samples.dtype, device = samples.device) #4 by 4
         # explained_var = pca.explained_variance_ #array of len 4
         for d in range(dim):
             u = vectors[d]
@@ -102,12 +105,9 @@ def calculate_PIT(samples, y, prerank):
     return torch.stack(pits)
 
 
-def pce(dist, y, n_samples = 100, alphas = torch.linspace(0, 1, 100), mode = 'all', prerank = 'pca', setup = 'real'):
+def pce(dist, y, n_samples = 100, mode = 'all', prerank = 'pca'):
     alphas = torch.linspace(0, 1, M=100, dtype = y.dtype, device=y.device)
-    if setup=='simulated':
-        samples = dist.sample((y.shape[0] * n_samples,)).reshape(y.shape[0], n_samples, -1)
-    else:
-        samples = dist.sample((n_samples,)).permute(1, 0, 2) #256,100,4
+    samples = dist.sample((n_samples,)).permute(1, 0, 2) #256,100,4
     pit_values = calculate_PIT(samples, y, prerank = prerank) #shape (4,256,1) or (1, 256,1)
     dim = pit_values.shape[0]
     pces = []
