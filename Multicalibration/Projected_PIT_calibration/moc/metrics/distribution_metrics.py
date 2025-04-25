@@ -1,6 +1,7 @@
 import torch
 from sklearn.decomposition import PCA
 from .preranks import get_prerank
+torch.manual_seed(42)
 
 def nll(model, x, y):
     dist = model.predict(x)
@@ -70,6 +71,7 @@ def calculate_PIT(samples, y, prerank):
     pits = []
     M = samples.shape[1]
     dim = y.shape[1]
+    explained_var = torch.ones(dim)
     if prerank in ['mean', 'variance', 'dependency']:
         y_proj, samples_proj = get_prerank(y, samples, prerank)
         sorted_samples_proj = torch.sort(samples_proj, dim=1)[0] #256,100
@@ -88,7 +90,7 @@ def calculate_PIT(samples, y, prerank):
         pca = PCA(n_components=dim) #keeping all components, 4 in this case
         pca.fit(samples_np) #this will not work in gpu
         vectors = torch.tensor(pca.components_, dtype=samples.dtype, device = samples.device) #4 by 4
-        # explained_var = pca.explained_variance_ #array of len 4
+        explained_var = pca.explained_variance_ratio_ #array of len 4
         for d in range(dim):
             u = vectors[d]
             sample_proj = torch.matmul(samples, u) # 256,100,1
@@ -99,13 +101,16 @@ def calculate_PIT(samples, y, prerank):
             pits.append(cdfs)
     else:
         raise ValueError(f"Unknown prerank function: {prerank}")
-    return torch.stack(pits)
+    return torch.stack(pits), explained_var
 
 
-def pce(dist, y, n_samples = 100, mode = 'all', prerank = 'pca'):
-    alphas = torch.linspace(0, 1, M=100, dtype = y.dtype, device=y.device)
-    samples = dist.sample((n_samples,)).permute(1, 0, 2) #256,100,4
-    pit_values = calculate_PIT(samples, y, prerank = prerank) #shape (4,256,1) or (1, 256,1)
+def pce(dist, y, n_samples = 100, mode = 'all', prerank = 'pca', setup = 'real'):
+    alphas = torch.linspace(0, 1, 10, device=y.device)
+    if setup=='simulated':
+        samples = dist.sample((y.shape[0]*n_samples,)).reshape(y.shape[0], n_samples, -1)
+    else:
+        samples = dist.sample((n_samples,)).permute(1, 0, 2) #256,100,4
+    pit_values, _ = calculate_PIT(samples, y, prerank = prerank) #shape (4,256,1) or (1, 256,1)
     dim = pit_values.shape[0]
     pces = []
     for d in range(dim):
@@ -115,6 +120,6 @@ def pce(dist, y, n_samples = 100, mode = 'all', prerank = 'pca'):
         pce = torch.mean(torch.abs(cdf_estimates - alphas)).item()
         pces.append(pce)
     if mode == 'average':
-        return sum(pces)/len(pces)
+        return sum(pces)/len(pces), _
     elif mode == 'all':
-        return pces #it returns a list with 4 values, pce corresponding to each PCA
+        return pces, _ #it returns a list with 4 values, pce corresponding to each PCA
