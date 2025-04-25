@@ -87,9 +87,6 @@ def calculate_PIT(samples, y, prerank):
         samples_np = samples.detach().cpu().numpy().reshape(-1, y.shape[1])
         pca = PCA(n_components=dim) #keeping all components, 4 in this case
         pca.fit(samples_np) #this will not work in gpu
-        vectors = torch.tensor(pca.components_, dtype=samples.dtype, device=samples.device)
-        samples_np = samples.detach().cpu().numpy().reshape(-1, y.shape[1])
-        pca.fit(samples_np) #this will not work in gpu
         vectors = torch.tensor(pca.components_, dtype=samples.dtype, device = samples.device) #4 by 4
         # explained_var = pca.explained_variance_ #array of len 4
         for d in range(dim):

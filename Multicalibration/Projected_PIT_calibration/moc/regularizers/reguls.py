@@ -1,6 +1,13 @@
 import torch
 from sklearn.decomposition import PCA
 import numpy as np
+import sys
+import os
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from metrics.distribution_metrics import calculate_PIT
+
 
 
 # def projected_pit(y, v, samples):
@@ -56,15 +63,16 @@ def compute_quantile(y_hat, alphas, vector):
 
 def truncation_regularization(dist, y, num_samples = 1000, M = 100):
     y_hat = dist.sample((num_samples,)).permute(1, 0, 2) #256,1000,4
+    y_hat_np = y_hat.detach().cpu().numpy().reshape(-1,y.shape[1])
     pca = PCA(n_components=y.shape[1]) #keeping all components, 4 in this case
-    pca.fit(y_hat.reshape(-1,y.shape[1]))
-    vectors = pca.components_
+    pca.fit(y_hat_np)
+    vectors = torch.tensor(pca.components_, dtype=y.dtype, device = y.device)
     # Shape: (batch_size, number fo samples, dim)
     alphas = torch.linspace(0, 1, M, device=y_hat.device)
     dim = y.shape[1]
     trunc_total = 0.0
     for d in range(dim):
-        vector = torch.as_tensor(vectors[d], dtype=y.dtype, device=y.device) #4,1
+        vector = vectors[d]
         proj_y = torch.matmul(y, vector) #256,1
         quantiles = compute_quantile(y_hat, alphas, vector) #256,100
         # Broadcast y_proj for comparison
@@ -84,7 +92,7 @@ def truncation_regularization(dist, y, num_samples = 1000, M = 100):
 
 def pce_kde_regularization(dist, y, num_samples = 1000, M = 100, tau = 100, p = 1):
     y_hat = dist.sample((num_samples,)).permute(1, 0, 2)  # (256, 1000, 4)
-    pit_values = calculate_PIT(y_hat, y)[0]  # (4, 256, 1)
+    pit_values = calculate_PIT(y_hat, y, prerank = 'pca')  # (4, 256, 1)
     alphas = torch.linspace(0, 1, M, device=y_hat.device)  # (100,)
     dim = y.shape[1]
 
