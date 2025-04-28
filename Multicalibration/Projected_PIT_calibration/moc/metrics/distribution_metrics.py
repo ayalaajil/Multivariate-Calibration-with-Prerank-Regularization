@@ -67,15 +67,18 @@ def multivariate_energy_score(dist, y, n_samples = 100):
 
     return (term1 - term2).mean()  # (256,)
 
-def calculate_PIT(samples, y, prerank):
+def calculate_PIT(dist, y, n_samples, setup, prerank):
+    batch_size, dim = y.shape
+    if setup == 'simulated':
+        samples = dist.sample((batch_size*n_samples,)).reshape(batch_size, n_samples, dim)
+    else: 
+        samples = dist.sample((n_samples,)).permute(1, 0, 2) #256,100,4
     pits = []
-    M = samples.shape[1]
-    dim = y.shape[1]
-    explained_var = torch.ones(dim)
+    explained_var = torch.ones(dim) * (1/dim)
     if prerank in ['mean', 'variance', 'dependency']:
         y_proj, samples_proj = get_prerank(y, samples, prerank)
         sorted_samples_proj = torch.sort(samples_proj, dim=1)[0] #256,100
-        cdfs = torch.searchsorted(sorted_samples_proj, y_proj.unsqueeze(-1), side='right') / M #256,1
+        cdfs = torch.searchsorted(sorted_samples_proj, y_proj.unsqueeze(-1), side='right') / n_samples #256,1
         pits.append(cdfs)
     elif prerank == 'marginal':
         for d in range(dim):
@@ -83,7 +86,7 @@ def calculate_PIT(samples, y, prerank):
             dy = y[:,d] #256
             dsample_sorted = torch.sort(dsample, dim=1)[0]
             cdfs = torch.searchsorted(dsample_sorted.contiguous(), 
-                                      dy.unsqueeze(-1).contiguous(), side='right') / M #256,1
+                                      dy.unsqueeze(-1).contiguous(), side='right') / n_samples #256,1
             pits.append(cdfs)
     elif prerank == 'pca':
         samples_np = samples.detach().cpu().numpy().reshape(-1, y.shape[1])
@@ -97,8 +100,21 @@ def calculate_PIT(samples, y, prerank):
             y_proj = torch.matmul(y, u) #256,1
             sample_sorted = torch.sort(sample_proj, dim=1)[0] #256,100 sort across the columns
             cdfs = torch.searchsorted(sample_sorted.contiguous(), 
-                                      y_proj.unsqueeze(-1).contiguous(), side='right') / M #256,1
+                                      y_proj.unsqueeze(-1).contiguous(), side='right') / n_samples #256,1
             pits.append(cdfs)
+    elif prerank =='density':
+        #samples are of shape 256, 100, 4
+        print(dist.loc.shape, dist.covariance_matrix.shape)
+        log_densities_samples = []
+        #samples ()
+        for i in range(n_samples):
+            log_density = dist.log_prob(samples[:, i, :]) #10000,10
+            log_densities_samples.append(log_density) #256
+        log_densities_samples = torch.stack(log_densities_samples).permute(1,0)
+        # log_densities_samples = dist.log_prob(samples)#256,100
+        log_densities_y = dist.log_prob(y) #256
+        cdfs = (log_densities_samples <= log_densities_y.unsqueeze(1)).float().mean(dim=1) #256,1
+        pits.append(cdfs)
     else:
         raise ValueError(f"Unknown prerank function: {prerank}")
     return torch.stack(pits), explained_var
@@ -119,27 +135,17 @@ def calculate_PIT_density(dist, y, n_samples=100):
 
     return pits
 
-
 def pce(dist, y, n_samples = 1000, mode = 'all', prerank = 'pca', setup = 'real'):
     alphas = torch.linspace(0, 1, 100, device=y.device)
-    alpha = 1/100
-    if setup=='simulated':
-        samples = dist.sample((y.shape[0]*n_samples,)).reshape(y.shape[0], n_samples, -1)
-    else:
-        samples = dist.sample((n_samples,)).permute(1, 0, 2) #256,100,4
-    pit_values, _ = calculate_PIT(samples, y, prerank = prerank) #shape (4,256,1) or (1, 256,1)
+    pit_values, _ = calculate_PIT(dist, y, n_samples = n_samples, setup = setup, prerank = prerank) #shape (4,256,1) or (1, 256,1)
     dim = pit_values.shape[0]
     pces = []
     for d in range(dim):
         pits = pit_values[d].view(-1)  # shape: (256,)
         pits_sorted = pits.sort()[0]
-        print(alphas)
         cdf_estimates = torch.searchsorted(pits_sorted, alphas, side='right') / pits_sorted.numel()
-        print(cdf_estimates)
-        pdf_estimates = torch.cat((cdf_estimates[0:1], cdf_estimates[1:] - cdf_estimates[:-1]))
-        print(pdf_estimates)
-        new_metric = torch.mean(torch.abs(pdf_estimates - alpha)).item()
-        pces.append(new_metric)
+        pce = torch.mean(torch.abs(cdf_estimates - alphas)).item()
+        pces.append(pce)
     if mode == 'average':
         return sum(pces)/len(pces), _
     elif mode == 'all':
