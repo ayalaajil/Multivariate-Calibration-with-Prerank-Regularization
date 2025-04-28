@@ -103,9 +103,26 @@ def calculate_PIT(samples, y, prerank):
         raise ValueError(f"Unknown prerank function: {prerank}")
     return torch.stack(pits), explained_var
 
+def calculate_PIT_density(dist, y, n_samples=100):
+    batch_size, dim = y.shape
+    samples = dist.sample((y.shape[0]*n_samples,)).reshape(y.shape[0], n_samples, -1)
 
-def pce(dist, y, n_samples = 100, mode = 'all', prerank = 'pca', setup = 'real'):
-    alphas = torch.linspace(0, 1, 10, device=y.device)
+    samples_flat = samples.reshape(-1, dim)  # (batch_size * n_samples, dim)
+    log_probs = dist.log_prob(samples_flat)  # (batch_size * n_samples,)
+    log_probs = log_probs.view(batch_size, n_samples)  # (batch_size, n_samples)
+
+    log_probs_y = dist.log_prob(y)  # (batch_size,)
+
+    pits = (log_probs <= log_probs_y.unsqueeze(1)).float().mean(dim=1, keepdim=True)  # (batch_size, 1)
+
+    pits = pits.unsqueeze(0)  # (1, batch_size, 1)
+
+    return pits
+
+
+def pce(dist, y, n_samples = 1000, mode = 'all', prerank = 'pca', setup = 'real'):
+    alphas = torch.linspace(0, 1, 100, device=y.device)
+    alpha = 1/100
     if setup=='simulated':
         samples = dist.sample((y.shape[0]*n_samples,)).reshape(y.shape[0], n_samples, -1)
     else:
@@ -116,10 +133,16 @@ def pce(dist, y, n_samples = 100, mode = 'all', prerank = 'pca', setup = 'real')
     for d in range(dim):
         pits = pit_values[d].view(-1)  # shape: (256,)
         pits_sorted = pits.sort()[0]
+        print(alphas)
         cdf_estimates = torch.searchsorted(pits_sorted, alphas, side='right') / pits_sorted.numel()
-        pce = torch.mean(torch.abs(cdf_estimates - alphas)).item()
-        pces.append(pce)
+        print(cdf_estimates)
+        pdf_estimates = torch.cat((cdf_estimates[0:1], cdf_estimates[1:] - cdf_estimates[:-1]))
+        print(pdf_estimates)
+        new_metric = torch.mean(torch.abs(pdf_estimates - alpha)).item()
+        pces.append(new_metric)
     if mode == 'average':
         return sum(pces)/len(pces), _
     elif mode == 'all':
         return pces, _ #it returns a list with 4 values, pce corresponding to each PCA
+
+

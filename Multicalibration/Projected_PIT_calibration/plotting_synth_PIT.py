@@ -3,13 +3,13 @@ import numpy as np
 import matplotlib.pyplot as plt
 from torch.distributions.multivariate_normal import MultivariateNormal
 from matplotlib.backends.backend_pdf import PdfPages
-from moc.metrics.distribution_metrics import calculate_PIT
+from moc.metrics.distribution_metrics import calculate_PIT, calculate_PIT_density
 
 device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-n_model_samples_per_y = 10000
+n_model_samples_per_y = 100
 n_bins = 10
-n_true_samples=10000
+n_true_samples=1000
 
 def build_multivariate_normal(d, sigma2, tau, mean):
     indices = torch.arange(d).unsqueeze(0)
@@ -22,7 +22,10 @@ def plot_pit_for_distributions(true_dist, model_dist, prerank='identity'):
         samples = model_dist.sample((y.shape[0] * n_model_samples_per_y,)).reshape(y.shape[0], n_model_samples_per_y, -1)
         print(samples.shape)
 
-        pit_values = calculate_PIT(samples, y, prerank)
+        if prerank == 'density':
+            pit_values = calculate_PIT_density(model_dist, y)
+        else:
+            pit_values = calculate_PIT(samples, y, prerank) 
         total_pits_np = pit_values.detach().cpu().numpy()
 
     dimension = len(pit_values)
@@ -58,7 +61,7 @@ def plot_pit_for_distributions(true_dist, model_dist, prerank='identity'):
 
 def plots_per_method(method_name):
     
-    pdf_filename = f"{method_name}_synth_cfgC.pdf"
+    pdf_filename = f"{method_name}_synth_cfgD.pdf"
 
     d=10
     synthetic_params = [
@@ -104,7 +107,15 @@ def plots_per_method(method_name):
                     )
                     pdf.savefig(fig)
                     plt.close(fig)
+            elif method_name == "HDR":
+                fig = plot_pit_for_distributions(true_dist, model_dist, prerank='density')
+                fig.suptitle(f"PIT histograms with prerank:density \n"+
+                f"Dataset {i+1}: d={d}, σ²={sigma2}, τ={tau}, " + r"$\mathrm{{mean}} = (%.2f)^{%d}$" % (mean_val, d) ,
+                fontsize=14
+                )
+                pdf.savefig(fig)
+                plt.close(fig)
 
 if __name__ == "__main__":
-    for method in ["marginal", "PCA", "prerank"]:
+    for method in ["HDR"]:
         plots_per_method(method)
