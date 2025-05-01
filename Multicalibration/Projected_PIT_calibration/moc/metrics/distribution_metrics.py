@@ -71,7 +71,9 @@ def multivariate_energy_score(dist, y, n_samples = 100):
 def calculate_PIT(dist, y, n_samples, setup, prerank):
     batch_size, dim = y.shape
     if setup == 'simulated':
-        samples = dist.sample((batch_size*n_samples,)).reshape(batch_size, n_samples, dim)
+        samples = dist.sample((batch_size*n_samples,)).reshape(batch_size, n_samples, dim) #10000, 1000, 10
+        print("samples.shape")
+        print(samples.shape)
     else: 
         samples = dist.sample((n_samples,)).permute(1, 0, 2) #256,100,4
     pits = []
@@ -106,7 +108,6 @@ def calculate_PIT(dist, y, n_samples, setup, prerank):
     elif prerank =='density':
         #samples are of shape 256, 100, 4
         log_densities_samples = []
-        #samples ()
         for i in range(n_samples):
             log_density = dist.log_prob(samples[:, i, :]) #10000,10
             log_densities_samples.append(log_density) #256
