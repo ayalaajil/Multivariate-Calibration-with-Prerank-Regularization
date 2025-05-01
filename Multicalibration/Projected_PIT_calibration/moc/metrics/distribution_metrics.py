@@ -104,9 +104,6 @@ def calculate_PIT(dist, y, n_samples, setup, prerank):
             pits.append(cdfs)
     elif prerank =='density':
         #samples are of shape 256, 100, 4
-        #Let's see the pdfs with flattening and without
-        samples_flat = samples.reshape(-1, dim)
-        log_probs_flat = dist.log_prob(samples_flat).view(batch_size, n_samples)
         log_densities_samples = []
         #samples ()
         for i in range(n_samples):
@@ -140,7 +137,6 @@ def calculate_PIT(dist, y, n_samples, setup, prerank):
 def pce(dist, y, n_samples = 1000, mode = 'all', prerank = 'pca', setup = 'real'):
     alphas = torch.linspace(0, 1, 100, device=y.device)
     pit_values, _ = calculate_PIT(dist, y, n_samples = n_samples, setup = setup, prerank = prerank) #shape (4,256,1) or (1, 256,1)
-    print(f"pit values have shape {pit_values.shape}")
     dim = pit_values.shape[0]
     pces = []
     for d in range(dim):

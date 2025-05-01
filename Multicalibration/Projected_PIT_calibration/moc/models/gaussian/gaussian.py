@@ -1,10 +1,15 @@
 import logging
-
+import sys
+import os
 import torch
 from lightning.pytorch import LightningModule
 from torch.distributions import MultivariateNormal
+from moc.metrics.distribution_metrics import multivariate_energy_score, pce
+from pathlib import Path
 
-from moc.metrics.distribution_metrics import energy_score
+reg_path = Path(__file__).resolve().parents[2]
+sys.path.append(str(reg_path))
+from regularizers.reguls import truncation_regularization, pce_kde_regularization
 
 
 log = logging.getLogger('moc')
@@ -74,8 +79,11 @@ class GaussianLightningModule(LightningModule):
         hidden_size: int = 100,
         num_layers: int = 3,
         loss: str = 'nll',
-        es_num_samples: int = 50,
+        es_num_samples: int = 100,
         lr=1e-4,
+        lambda_reg: float = 0.0,
+        reg_type: str = 'pce-kde',
+        prerank: str = 'none',
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -106,32 +114,48 @@ class GaussianLightningModule(LightningModule):
         return self(x)
 
     def compute_loss(self, dist, y):
+        reg_val = 0.0  # raw reg
+        reg_term = 0.0  # scaled reg
+        if self.hparams.reg_type == 'truncation':
+            reg_val = truncation_regularization(dist, y)
+        elif self.hparams.reg_type == 'pce-kde':
+            reg_val = pce_kde_regularization(dist, y, self.hparams.prerank)
+
         if self.hparams.loss == 'nll':
-            return -dist.log_prob(y).mean()
+            loss_term = -dist.log_prob(y).mean()
         elif self.hparams.loss == 'es':
-            return energy_score(dist, y, n_samples=self.hparams.es_num_samples)
+            loss_term = multivariate_energy_score(dist, y, n_samples=self.hparams.es_num_samples).mean()
         else:
             raise ValueError(f'Invalid loss: {self.hparams.loss}')
+
+        # pce_score = pce(dist, y) #return a list of d elements
+
+        reg_term = self.hparams.lambda_reg * reg_val
+        total_loss = loss_term + reg_term
+
+        return total_loss, reg_val
+    
 
     def step(self, batch):
         x, y = batch
         dist = self(x)
-        loss = self.compute_loss(dist, y)
-        return loss
+        total_loss, raw_reg = self.compute_loss(dist, y)
+        return total_loss, raw_reg
 
     def training_step(self, batch, batch_idx):
-        return self.step(batch)
+        total_loss, raw_reg = self.step(batch)
+        return total_loss
 
     def validation_step(self, batch, batch_idx):
-        loss = self.step(batch)
+        total_loss, raw_reg = self.step(batch)
         self.log(
             f'val/loss',
-            loss,
+            total_loss,
             on_step=False,
             on_epoch=True,
             prog_bar=True,
         )
-        return loss
+        return total_loss
 
     def configure_optimizers(self):
         return torch.optim.Adam(params=self.parameters(), lr=self.hparams.lr)

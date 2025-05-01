@@ -468,7 +468,7 @@ rpds-py==0.22.3
     # via
     #   jsonschema
     #   referencing
-rpy2==3.5.17
+# rpy2==3.5.17
     # via -r requirements.in
 scikit-learn==1.6.1
     # via

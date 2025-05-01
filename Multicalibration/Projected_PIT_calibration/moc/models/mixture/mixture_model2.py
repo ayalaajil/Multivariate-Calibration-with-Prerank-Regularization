@@ -13,7 +13,7 @@ from moc.metrics.distribution_metrics import multivariate_energy_score, pce
 
 reg_path = Path(__file__).resolve().parents[2]
 sys.path.append(str(reg_path))
-from regularizers.reguls import rqr_regularization, truncation_regularization, pce_kde_regularization
+from regularizers.reguls import truncation_regularization, pce_kde_regularization
 log = logging.getLogger('moc')
 
 class MLP(torch.nn.Module):
