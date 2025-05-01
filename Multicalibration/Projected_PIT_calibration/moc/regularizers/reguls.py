@@ -95,7 +95,7 @@ def pce_kde_regularization(dist, y, prerank, num_samples = 100, M = 100, tau = 1
     alphas = torch.linspace(0, 1, M, device=pit_values.device)  # (100,)
     dim = pit_values.shape[0]
 
-    pce_kde = 0.0
+    pce_kdes = []
     for d in range(dim):
         # Expand for broadcasting
         pit_d = pit_values[d]  # (256, 1)
@@ -104,6 +104,10 @@ def pce_kde_regularization(dist, y, prerank, num_samples = 100, M = 100, tau = 1
 
         # Compute phi_kde for all alphas at once
         phi_kde = torch.sigmoid(tau * (alphas_exp - pit_exp)).mean(dim=0)  # (100,)
-        pce_kde += torch.abs(alphas - phi_kde).pow(p).mean()
-
-    return pce_kde / dim
+        pce_kde =  torch.abs(alphas - phi_kde).pow(p).mean()
+        pce_kdes.append(pce_kde)
+    pce_kdes = torch.stack(pce_kdes)  # (4, 100)
+    if prerank == 'pca':
+        explained_var = torch.from_numpy(_).to(pce_kdes.device)
+        return (pce_kdes * explained_var).sum()
+    else: return pce_kdes.mean()

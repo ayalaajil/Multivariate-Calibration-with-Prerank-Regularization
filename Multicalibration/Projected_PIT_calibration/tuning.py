@@ -22,32 +22,35 @@ datamodule = RealDataModule(rc, num_workers = 8)
 p, q = datamodule.input_dim, datamodule.output_dim
 
 lambdas = np.linspace(0,10,20)
-pce_energy_pairs = {}
-for l in lambdas:
-    print(f"working on lambda {l:.2f}")
-    model = GaussianLightningModule(p, q, lambda_reg = l, reg_type = 'pce-kde', prerank = 'dependency')
-    trainer = get_lightning_trainer(rc)
-    trainer.fit(model, datamodule)
-    model.to(config.device)
-    model.eval()
-    pces, energies = 0.0, 0.0
-    with torch.no_grad():
-        for x, y in datamodule.val_dataloader():
-            x = x.to(config.device)
-            y = y.to(config.device)
-            dist = model.predict(x)  # Ensure `dist` is on the same device as `x` and `y`
-            
-            # Calculate metrics (both return floats)
-            pce_score, _ = pce(dist, y, n_samples = 20, mode = 'average', 
-                               prerank = 'dependency', setup = 'real') 
-            energy_score = multivariate_energy_score(dist, y) 
-            pces += pce_score
-            energies += energy_score
+# preranks = ['marginal', 'mean', 'variance', 'dependency', 'pca', 'density']
+preranks = ['pca', 'density']
+for prerank in preranks:
+    pce_energy_pairs = {}
+    for l in lambdas:
+        print(f"working on lambda {l:.2f}")
+        model = GaussianLightningModule(p, q, lambda_reg = l, reg_type = 'pce-kde', prerank = prerank)
+        trainer = get_lightning_trainer(rc)
+        trainer.fit(model, datamodule)
+        model.to(config.device)
+        model.eval()
+        pces, energies = 0.0, 0.0
+        with torch.no_grad():
+            for x, y in datamodule.val_dataloader():
+                x = x.to(config.device)
+                y = y.to(config.device)
+                dist = model.predict(x)  # Ensure `dist` is on the same device as `x` and `y`
+                
+                # Calculate metrics (both return floats)
+                pce_score = pce(dist, y, n_samples = 20, mode = 'average', 
+                                prerank = prerank, setup = 'real') 
+                energy_score = multivariate_energy_score(dist, y) 
+                pces += pce_score
+                energies += energy_score
 
-    # Average over batches
-    pces /= len(datamodule.val_dataloader())
-    energies /= len(datamodule.val_dataloader())
-    pce_energy_pairs[l] = (pces, energies.item())
-
-with open('pkl-files/tuning_gaussNLL_households_pce_dep.pkl', 'wb') as f:
-    pickle.dump(pce_energy_pairs, f)
+        # Average over batches
+        pces /= len(datamodule.val_dataloader())
+        energies /= len(datamodule.val_dataloader())
+        pce_energy_pairs[l] = (pces.item(), energies.item())
+    filename = f'pkl-files/tuning_gaussNLL_households_pce_{prerank}.pkl'
+    with open(filename, 'wb') as f:
+        pickle.dump(pce_energy_pairs, f)
