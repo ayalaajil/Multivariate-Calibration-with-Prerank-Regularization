@@ -7,14 +7,17 @@ from moc.models.trainers.lightning_trainer import get_lightning_trainer
 from moc.datamodules.real_datamodule import RealDataModule
 import numpy as np
 import matplotlib.pyplot as plt
-from moc.metrics.distribution_metrics import calculate_PIT
+from moc.metrics.distribution_metrics import calculate_PIT, calculate_PIT_density
 from matplotlib.backends.backend_pdf import PdfPages
 import torch
 
 config = get_config()
 config.device = 'cuda'
 M = 100
+
+
 alphas = torch.linspace(0, 1, M, device=config.device)
+
 
 def plot_pit_per_dataset(config, prerank, data_group, data_name):
     rc = RunConfig(config, data_group, data_name)
@@ -36,7 +39,10 @@ def plot_pit_per_dataset(config, prerank, data_group, data_name):
             dist = model.predict(x)
             samples = dist.sample((100,)).permute(1, 0, 2) #256,100,4
             c = min(y.shape[1], 3)
-            pit_values = calculate_PIT(samples, y, prerank) 
+            if prerank == 'density':
+                pit_values = calculate_PIT_density(dist, y)
+            else:
+                pit_values = calculate_PIT(samples, y, prerank) 
             total_pits.append(pit_values)
     total_pits = torch.cat(total_pits, dim=1)
     total_pits_np = total_pits.detach().cpu().numpy() #shape (n_components, number of test data points, 1)
@@ -105,9 +111,17 @@ def plots_per_method(config, method_name):
                     fig = plot_pit_per_dataset(config, prerank, data_group, data_name)
                     pdf.savefig(fig)
                     plt.close(fig)
+            elif method_name == "HDR":
+                fig = plot_pit_per_dataset(config,'density', data_group, data_name)
+                fig.suptitle(f"PIT histograms with prerank:density \n"+
+                f"Dataset {i+1}: d={d}, σ²={sigma2}, τ={tau}, " + r"$\mathrm{{mean}} = (%.2f)^{%d}$" % (mean_val, d) ,
+                fontsize=14
+                )
+                pdf.savefig(fig)
+                plt.close(fig)
 
 def plots(config):
-    methods= ["marginal", "PCA", "prerank"]
+    methods= ["HDR"]
     for method in methods:
         print(f"Working with method {method}")
         plots_per_method(config, method)

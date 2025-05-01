@@ -16,16 +16,10 @@ def build_multivariate_normal(d, sigma2, tau, mean):
     covariance_matrix = sigma2 * torch.exp(-torch.abs(indices.T - indices) / tau)
     return MultivariateNormal(mean, covariance_matrix)
 
-def plot_pit_for_distributions(true_dist, model_dist, prerank='identity'):
+def plot_pit_for_distributions(true_dist, model_dist, prerank='identity', setup = 'real'):
     with torch.no_grad():
         y = true_dist.sample((n_true_samples,)).to(device)
-        samples = model_dist.sample((y.shape[0] * n_model_samples_per_y,)).reshape(y.shape[0], n_model_samples_per_y, -1)
-        print(samples.shape)
-
-        if prerank == 'density':
-            pit_values = calculate_PIT_density(model_dist, y)
-        else:
-            pit_values = calculate_PIT(samples, y, prerank) 
+        pit_values = calculate_PIT(model_dist, y, n_samples = n_true_samples, setup = setup, prerank = prerank)[0] 
         total_pits_np = pit_values.detach().cpu().numpy()
 
     dimension = len(pit_values)
@@ -83,7 +77,7 @@ def plots_per_method(method_name):
             mean_val = mean[0].item()
             
             if method_name == "marginal":
-                fig = plot_pit_for_distributions(true_dist, model_dist, prerank='identity')
+                fig = plot_pit_for_distributions(true_dist, model_dist, prerank='identity', setup="simulated")
                 fig.suptitle(f"PIT histograms with prerank: marginal \n"+
                 f"Dataset {i+1}: d={d}, σ²={sigma2}, τ={tau}, " + r"$\mathrm{{mean}} = (%.2f)^{%d}$" % (mean_val, d) ,
                 fontsize=14
@@ -91,7 +85,7 @@ def plots_per_method(method_name):
                 pdf.savefig(fig)
                 plt.close(fig)
             elif method_name == "PCA":
-                fig = plot_pit_for_distributions(true_dist, model_dist, prerank='pca')
+                fig = plot_pit_for_distributions(true_dist, model_dist, prerank='pca', setup="simulated")
                 fig.suptitle(f"PIT histograms with prerank:PCA\n"+
                 f"Dataset {i+1}: d={d}, σ²={sigma2}, τ={tau}, " + r"$\mathrm{{mean}} = (%.2f)^{%d}$" % (mean_val, d) ,
                 fontsize=14
@@ -100,7 +94,7 @@ def plots_per_method(method_name):
                 plt.close(fig)
             elif method_name == "prerank":
                 for prerank in ['mean', 'variance', 'dependency']:
-                    fig = plot_pit_for_distributions(true_dist, model_dist, prerank=prerank)
+                    fig = plot_pit_for_distributions(true_dist, model_dist, prerank=prerank, setup="simulated")
                     fig.suptitle(f"PIT histograms with prerank: {prerank} \n"+
                     f"Dataset {i+1}: d={d}, σ²={sigma2}, τ={tau}, " + r"$\mathrm{{mean}} = (%.2f)^{%d}$" % (mean_val, d) ,
                     fontsize=14
@@ -108,7 +102,7 @@ def plots_per_method(method_name):
                     pdf.savefig(fig)
                     plt.close(fig)
             elif method_name == "HDR":
-                fig = plot_pit_for_distributions(true_dist, model_dist, prerank='density')
+                fig = plot_pit_for_distributions(true_dist, model_dist, prerank='density', setup="simulated")
                 fig.suptitle(f"PIT histograms with prerank:density \n"+
                 f"Dataset {i+1}: d={d}, σ²={sigma2}, τ={tau}, " + r"$\mathrm{{mean}} = (%.2f)^{%d}$" % (mean_val, d) ,
                 fontsize=14
