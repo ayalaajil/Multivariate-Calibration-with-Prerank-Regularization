@@ -106,9 +106,7 @@ def calculate_PIT(dist, y, n_samples, setup, prerank):
             pits.append(cdfs)
     elif prerank =='density':
         #samples are of shape 256, 100, 4
-        print(dist.loc.shape, dist.covariance_matrix.shape)
         log_densities_samples = []
-        #samples ()
         for i in range(n_samples):
             log_density = dist.log_prob(samples[:, i, :]) #10000,10
             log_densities_samples.append(log_density) #256
@@ -121,35 +119,26 @@ def calculate_PIT(dist, y, n_samples, setup, prerank):
         raise ValueError(f"Unknown prerank function: {prerank}")
     return torch.stack(pits), explained_var
 
-def calculate_PIT_density(dist, y, n_samples=1000):
-    batch_size, dim = y.shape
-    explained_var = torch.ones(dim) * (1/dim)
-    samples = dist.sample((y.shape[0]*n_samples,)).reshape(y.shape[0], n_samples, -1) #10000, 1000, 10
-    print()
+# def calculate_PIT_density(dist, y, n_samples=100):
+#     batch_size, dim = y.shape
+#     samples = dist.sample((y.shape[0]*n_samples,)).reshape(y.shape[0], n_samples, -1)
 
-    samples_flat = samples.reshape(-1, dim)  # (batch_size * n_samples, dim)
-    log_probs = dist.log_prob(samples_flat)  # (batch_size * n_samples,)
-    log_probs = log_probs.view(batch_size, n_samples)  # (batch_size, n_samples)
-    print(log_probs)
+#     samples_flat = samples.reshape(-1, dim)  # (batch_size * n_samples, dim)
+#     log_probs = dist.log_prob(samples_flat)  # (batch_size * n_samples,)
+#     log_probs = log_probs.view(batch_size, n_samples)  # (batch_size, n_samples)
 
-    log_probs_y = dist.log_prob(y)  # (batch_size,)
+#     log_probs_y = dist.log_prob(y)  # (batch_size,)
 
-    pits = (log_probs <= log_probs_y.unsqueeze(1)).float().mean(dim=1, keepdim=True)  # (batch_size, 1)
-    print("pits")
-    print(pits)
+#     pits = (log_probs <= log_probs_y.unsqueeze(1)).float().mean(dim=1, keepdim=True)  # (batch_size, 1)
 
-    pits = pits.unsqueeze(0)  # (1, batch_size, 1)
+#     pits = pits.unsqueeze(0)  # (1, batch_size, 1)
 
-    return pits,explained_var
+#     return pits
 
 def pce(dist, y, n_samples = 1000, mode = 'all', prerank = 'pca', setup = 'real'):
     alphas = torch.linspace(0, 1, 100, device=y.device)
-    #pit_values, _ = calculate_PIT(dist, y, n_samples = n_samples, setup = setup, prerank = prerank) #shape (4,256,1) or (1, 256,1)
-    pit_values, _= calculate_PIT_density(dist, y, n_samples = n_samples)
-    print("pit_values")
-    print(pit_values)
+    pit_values, _ = calculate_PIT(dist, y, n_samples = n_samples, setup = setup, prerank = prerank) #shape (4,256,1) or (1, 256,1)
     dim = pit_values.shape[0]
-    print(dim)
     pces = []
     for d in range(dim):
         pits = pit_values[d].view(-1)  # shape: (256,)

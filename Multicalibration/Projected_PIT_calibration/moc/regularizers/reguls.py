@@ -90,11 +90,10 @@ def truncation_regularization(dist, y, num_samples = 1000, M = 100):
 
     return trunc_total / dim
 
-def pce_kde_regularization(dist, y, num_samples = 1000, M = 100, tau = 100, p = 1):
-    y_hat = dist.sample((num_samples,)).permute(1, 0, 2)  # (256, 1000, 4)
-    pit_values = calculate_PIT(y_hat, y, prerank = 'pca')  # (4, 256, 1)
-    alphas = torch.linspace(0, 1, M, device=y_hat.device)  # (100,)
-    dim = y.shape[1]
+def pce_kde_regularization(dist, y, prerank, num_samples = 100, M = 100, tau = 100, p = 1):
+    pit_values, _ = calculate_PIT(dist, y, n_samples = num_samples, setup = 'real', prerank = prerank)  # (4, 256, 1)
+    alphas = torch.linspace(0, 1, M, device=pit_values.device)  # (100,)
+    dim = pit_values.shape[0]
 
     pce_kde = 0.0
     for d in range(dim):
