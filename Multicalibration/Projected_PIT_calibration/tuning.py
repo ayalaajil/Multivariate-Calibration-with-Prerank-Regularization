@@ -14,7 +14,7 @@ config = get_config()
 config.device = 'cuda'
 M = 100
 alphas = torch.linspace(0, 1, M, device=config.device)
-data_type, data_name = 'feldman', 'bio'
+data_type, data_name = 'mulan', 'rf2'
 # rc = RunConfig(config, 'mulan', 'rf2')
 rc = RunConfig(config, data_type, data_name)
 # rc = RunConfig(config,'camehl', 'households')
@@ -23,7 +23,8 @@ datamodule = RealDataModule(rc, num_workers = 8)
 p, q = datamodule.input_dim, datamodule.output_dim
 
 lambdas = np.linspace(0,10,20)
-preranks = ['marginal', 'mean', 'variance', 'dependency', 'pca', 'density']
+# preranks = ['marginal', 'mean', 'variance', 'dependency', 'pca', 'density']
+preranks = ['density']
 for prerank in preranks:
     pce_energy_pairs = {}
     for l in lambdas:
