@@ -82,7 +82,7 @@ class GaussianLightningModule(LightningModule):
         es_num_samples: int = 100,
         lr=1e-4,
         lambda_reg: float = 0.0,
-        reg_type: str = 'pce-kde',
+        reg_type: str = 'none',
         prerank: str = 'none',
     ):
         super().__init__()

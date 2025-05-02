@@ -156,4 +156,19 @@ def pce(dist, y, n_samples = 1000, mode = 'all', prerank = 'pca', setup = 'real'
     elif mode == 'all':
         return pces #it returns a list with 4 values, pce corresponding to each PCA
 
+def reliability_plots(dist, y, n_samples = 1000, mode = 'all', prerank = 'pca', setup = 'real'):
+    alphas = torch.linspace(0, 1, 100, device=y.device)
+    pit_values, _ = calculate_PIT(dist, y, n_samples = n_samples, setup = setup, prerank = prerank) #shape (4,256,1) or (1, 256,1)
+    dim = pit_values.shape[0]
+    cdfs = []
+    for d in range(dim):
+        pits = pit_values[d].view(-1)  # shape: (256,)
+        pits_sorted = pits.sort()[0]
+        cdf_estimates = torch.searchsorted(pits_sorted, alphas, side='right') / pits_sorted.numel()
+        cdfs.append(cdf_estimates)
+    cdfs = torch.stack(cdfs)
+    explained_var = torch.from_numpy(_).to(cdfs.device).unsqueeze(-1)  # shape: (4,)
+    if prerank =='pca':
+        return (cdfs * explained_var).sum(dim=0)
+    return cdfs.mean(dim=0)
 

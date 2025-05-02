@@ -14,20 +14,20 @@ config = get_config()
 config.device = 'cuda'
 M = 100
 alphas = torch.linspace(0, 1, M, device=config.device)
+data_type, data_name = 'feldman', 'bio'
 # rc = RunConfig(config, 'mulan', 'rf2')
-#rc = RunConfig(config,'feldman', 'bio')
-rc = RunConfig(config,'camehl', 'households')
+rc = RunConfig(config, data_type, data_name)
+# rc = RunConfig(config,'camehl', 'households')
 #rc = RunConfig(config,'del_barrio', 'ansur2')
 datamodule = RealDataModule(rc, num_workers = 8)
 p, q = datamodule.input_dim, datamodule.output_dim
 
 lambdas = np.linspace(0,10,20)
-# preranks = ['marginal', 'mean', 'variance', 'dependency', 'pca', 'density']
-preranks = ['pca', 'density']
+preranks = ['marginal', 'mean', 'variance', 'dependency', 'pca', 'density']
 for prerank in preranks:
     pce_energy_pairs = {}
     for l in lambdas:
-        print(f"working on lambda {l:.2f}")
+        print(f"working on lambda {l:.2f}, data {data_name}, prerank {prerank}")
         model = GaussianLightningModule(p, q, lambda_reg = l, reg_type = 'pce-kde', prerank = prerank)
         trainer = get_lightning_trainer(rc)
         trainer.fit(model, datamodule)
@@ -51,6 +51,6 @@ for prerank in preranks:
         pces /= len(datamodule.val_dataloader())
         energies /= len(datamodule.val_dataloader())
         pce_energy_pairs[l] = (pces.item(), energies.item())
-    filename = f'pkl-files/tuning_gaussNLL_households_pce_{prerank}.pkl'
+    filename = f'pkl-files/tuning_gaussNLL_{data_name}_pce_{prerank}.pkl'
     with open(filename, 'wb') as f:
         pickle.dump(pce_energy_pairs, f)
