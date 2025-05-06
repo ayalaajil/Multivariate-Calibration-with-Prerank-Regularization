@@ -139,11 +139,10 @@ class MixtureLightningModule(LightningModule):
     def compute_loss(self, dist, y):
 
         reg_val = 0.0  # raw reg
-        reg_term = 0.0  # scaled reg
         if self.hparams.reg_type == 'truncation':
             reg_val = truncation_regularization(dist, y)
         elif self.hparams.reg_type == 'pce-kde':
-            reg_val = pce_kde_regularization(dist, y, self.hparams.prerank)
+            reg_val = pce_kde_regularization(dist, y, n_samples = self.hparams.es_num_samples, prerank = self.hparams.prerank)
 
         if self.hparams.loss == 'nll':
             loss_term = -dist.log_prob(y).mean()
@@ -152,26 +151,26 @@ class MixtureLightningModule(LightningModule):
         else:
             raise ValueError(f'Invalid loss: {self.hparams.loss}')
 
-        # pce_score = pce(dist, y) #return a list of d elements
+        pce_score = pce(dist, y, n_samples = self.hparams.es_num_samples, prerank = self.hparams.prerank) #return a list of d elements
 
-        reg_term = self.hparams.lambda_reg * reg_val
-        total_loss = loss_term + reg_term
+        total_loss = loss_term + (self.hparams.lambda_reg * reg_val)
 
-        return total_loss, loss_term, reg_val
+        return total_loss, loss_term, reg_val, pce_score
 
 
     def step(self, batch):
         x, y = batch
         dist = self(x) #256 distributions in 4D
-        total_loss, loss_term, raw_reg = self.compute_loss(dist, y)
-        return total_loss, loss_term, raw_reg
+        total_loss, loss_term, raw_reg, pce_score = self.compute_loss(dist, y)
+        return total_loss, loss_term, raw_reg, pce_score
 
     def training_step(self, batch, batch_idx):
-        total_loss, loss_term, raw_reg = self.step(batch)
+        total_loss, loss_term, raw_reg, pce_score = self.step(batch)
         self.train_step_outputs.append({
             "total_loss": total_loss.detach().cpu().numpy(), #float
             "raw_reg": raw_reg, #float
             "nll": loss_term.detach().cpu().numpy(), #a list
+            "pce_score": pce_score.detach().cpu().numpy(), #a list
         })
         return total_loss
     
@@ -179,21 +178,25 @@ class MixtureLightningModule(LightningModule):
         total_losses = []
         raw_regs = []
         nlls = []
+        pce_scores = []
 
         for out in self.train_step_outputs:
             total_losses.append(float(out["total_loss"]))
             raw_regs.append(float(out["raw_reg"]))
             nlls.append(np.array(out["nll"]))  # shape: (d,)
+            pce_scores.append(np.array(out["pce_score"]))  # shape: (d,)
 
         avg_total_loss = np.mean(total_losses)
         avg_raw_reg = np.mean(raw_regs)
-        avg_nll = np.mean(nlls)  # shape: (d,)
+        avg_nll = np.mean(nlls)
+        avg_pce = np.mean(pce_scores)  # shape: (d,)
 
         # Build log dictionary
         log_dict = {
             "train/total_loss": avg_total_loss,
             "train/raw_reg": avg_raw_reg,
             "train/nll": avg_nll,
+            "train/pce": avg_pce,
         }
 
         # Add each dimension of the PCE score
@@ -208,7 +211,7 @@ class MixtureLightningModule(LightningModule):
         
 
     def validation_step(self, batch, batch_idx):
-        total_loss, loss_term, raw_reg = self.step(batch)
+        total_loss, loss_term, raw_reg, pce_score = self.step(batch)
         self.log(
             f'val/loss',
             total_loss,
@@ -219,7 +222,8 @@ class MixtureLightningModule(LightningModule):
         self.validation_step_outputs.append({
             "total_loss": total_loss.detach().cpu().numpy(), #float
             "raw_reg": raw_reg,
-            "nll": loss_term.detach().cpu().numpy(), #a list
+            "nll": loss_term.detach().cpu().numpy(),
+            "pce_score": pce_score.detach().cpu().numpy(),
         })
         return total_loss
     
@@ -227,21 +231,25 @@ class MixtureLightningModule(LightningModule):
         total_losses = []
         raw_regs = []
         nlls = []
+        pce_scores = []
 
         for out in self.validation_step_outputs:
             total_losses.append(float(out["total_loss"]))
             raw_regs.append(float(out["raw_reg"]))
             nlls.append(np.array(out["nll"]))
+            pce_scores.append(np.array(out["pce_score"]))  # shape: (d,)
 
         avg_total_loss = np.mean(total_losses)
         avg_raw_reg = np.mean(raw_regs)
         avg_nll_score = np.mean(nlls)
+        avg_pce = np.mean(pce_scores)
 
         # Build log dictionary
         log_dict = {
             "val/total_loss": avg_total_loss,
             "val/raw_reg": avg_raw_reg,
             "val/nll": avg_nll_score,
+            "val/pce": avg_pce,
         }
 
         # Add each dimension of the PCE score
