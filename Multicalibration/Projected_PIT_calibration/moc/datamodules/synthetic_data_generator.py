@@ -256,12 +256,12 @@ if __name__ == "__main__":
 
     configs = [
         ("linear", False, False),  # Linear, independent X
-        ("linear", True, False),   # Linear, dependent X
-        ("nonlinear", False, False),  # Nonlinear, independent X, uncoupled outputs
-        ("nonlinear", False, True),   # Nonlinear, independent X, coupled outputs
-        ("nonlinear", True, False),   # Nonlinear, dependent X, uncoupled outputs
-        ("nonlinear", True, True),    # Nonlinear, dependent X, coupled outputs
-        ("latent", False, False),     # Latent (X dependency not applicable)
+        # ("linear", True, False),   # Linear, dependent X
+        # ("nonlinear", False, False),  # Nonlinear, independent X, uncoupled outputs
+        # ("nonlinear", False, True),   # Nonlinear, independent X, coupled outputs
+        # ("nonlinear", True, False),   # Nonlinear, dependent X, uncoupled outputs
+        # ("nonlinear", True, True),    # Nonlinear, dependent X, coupled outputs
+        # ("latent", False, False),     # Latent (X dependency not applicable)
     ]
 
     for mode, dependent_X, coupled_outputs in configs:

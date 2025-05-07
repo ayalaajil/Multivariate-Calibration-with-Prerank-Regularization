@@ -1,6 +1,7 @@
 from .real_datamodule import RealDataModule
 from .toy_datamodule import ToyDataModule
 from .cifar10_datamodule import CIFAR10DataModule
+from .generated import GeneratedDataModule
 from moc.configs.datasets import toy_dataset_groups, real_dataset_groups
 
 
@@ -11,6 +12,8 @@ def get_datamodule(group):
         return RealDataModule
     elif group == 'cifar10':
         return CIFAR10DataModule
+    elif group == 'generated':
+        return GeneratedDataModule
     raise ValueError(f'Unknown datamodule {group}')
 
 
