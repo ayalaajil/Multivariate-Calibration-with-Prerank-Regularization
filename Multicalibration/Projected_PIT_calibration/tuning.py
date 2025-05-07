@@ -16,7 +16,7 @@ M = 100
 alphas = torch.linspace(0, 1, M, device=config.device)
 # rc = RunConfig(config, 'mulan', 'rf2')
 #rc = RunConfig(config,'feldman', 'bio')
-rc = RunConfig(config,'camehl', 'households')
+rc = RunConfig(config,'mulan', 'scm20d')
 #rc = RunConfig(config,'del_barrio', 'ansur2')
 datamodule = RealDataModule(rc, num_workers = 8)
 p, q = datamodule.input_dim, datamodule.output_dim
@@ -25,7 +25,7 @@ lambdas = np.linspace(0,10,20)
 pce_energy_pairs = {}
 for l in lambdas:
     print(f"working on lambda {l:.2f}")
-    model = GaussianLightningModule(p, q, lambda_reg = l, reg_type = 'pce-kde', prerank = 'dependency')
+    model = GaussianLightningModule(p, q, lambda_reg = l, reg_type = 'pce-kde', prerank = 'marginal')
     trainer = get_lightning_trainer(rc)
     trainer.fit(model, datamodule)
     model.to(config.device)
@@ -39,7 +39,7 @@ for l in lambdas:
             
             # Calculate metrics (both return floats)
             pce_score, _ = pce(dist, y, n_samples = 20, mode = 'average', 
-                               prerank = 'dependency', setup = 'real') 
+                               prerank = 'marginal', setup = 'real') 
             energy_score = multivariate_energy_score(dist, y) 
             pces += pce_score
             energies += energy_score
@@ -49,5 +49,5 @@ for l in lambdas:
     energies /= len(datamodule.val_dataloader())
     pce_energy_pairs[l] = (pces, energies.item())
 
-with open('pkl-files/tuning_gaussNLL_households_pce_dep.pkl', 'wb') as f:
+with open('pkl-files/tuning_gaussNLL_scm20d_pce_marginal.pkl', 'wb') as f:
     pickle.dump(pce_energy_pairs, f)

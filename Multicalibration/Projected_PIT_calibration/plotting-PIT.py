@@ -102,7 +102,7 @@ def plots_per_method(config, method_name):
                 fig = plot_pit_per_dataset(config, 'identity', data_group, data_name)
                 pdf.savefig(fig)
                 plt.close(fig)
-            elif method_name == "PCA":
+            elif method_name == "pca":
                 fig = plot_pit_per_dataset(config, 'pca', data_group, data_name)
                 pdf.savefig(fig)
                 plt.close(fig)
