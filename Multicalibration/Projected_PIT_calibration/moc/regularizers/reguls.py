@@ -90,12 +90,12 @@ def truncation_regularization(dist, y, num_samples = 1000, M = 100):
 
     return trunc_total / dim
 
-def pce_kde_regularization(dist, y, prerank, num_samples = 100, M = 100, tau = 100, p = 1):
-    pit_values, _ = calculate_PIT(dist, y, n_samples = num_samples, setup = 'real', prerank = prerank)  # (4, 256, 1)
+def pce_kde_regularization(dist, y, prerank, n_samples = 100, M = 100, tau = 100, p = 1):
+    pit_values, _ = calculate_PIT(dist, y, n_samples = n_samples, setup = 'real', prerank = prerank)  # (4, 256, 1)
     alphas = torch.linspace(0, 1, M, device=pit_values.device)  # (100,)
     dim = pit_values.shape[0]
 
-    pce_kde = 0.0
+    pce_kdes = []
     for d in range(dim):
         # Expand for broadcasting
         pit_d = pit_values[d]  # (256, 1)
@@ -104,6 +104,10 @@ def pce_kde_regularization(dist, y, prerank, num_samples = 100, M = 100, tau = 1
 
         # Compute phi_kde for all alphas at once
         phi_kde = torch.sigmoid(tau * (alphas_exp - pit_exp)).mean(dim=0)  # (100,)
-        pce_kde += torch.abs(alphas - phi_kde).pow(p).mean()
-
-    return pce_kde / dim
+        pce_kde =  torch.abs(alphas - phi_kde).pow(p).mean()
+        pce_kdes.append(pce_kde)
+    pce_kdes = torch.stack(pce_kdes)  # (4, 100)
+    if prerank == 'pca':
+        explained_var = torch.from_numpy(_).to(pce_kdes.device)
+        return (pce_kdes * explained_var).sum()
+    else: return pce_kdes.mean()

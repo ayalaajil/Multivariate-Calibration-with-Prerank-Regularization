@@ -45,7 +45,7 @@ def get_lightning_trainer(rc):
         monitor='val/loss',
         mode='min',
         patience=15,
-        min_delta=1e-4 ,
+        min_delta=1e-4,
         verbose = False,
     )
 

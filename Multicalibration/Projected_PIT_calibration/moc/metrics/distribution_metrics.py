@@ -1,4 +1,5 @@
 import torch
+import numpy as np
 from sklearn.decomposition import PCA
 from .preranks import get_prerank
 torch.manual_seed(42)
@@ -72,9 +73,9 @@ def calculate_PIT(dist, y, n_samples, setup, prerank):
     if setup == 'simulated':
         samples = dist.sample((batch_size*n_samples,)).reshape(batch_size, n_samples, dim) #10000, 1000, 10
     else: 
-        samples = dist.sample((n_samples,)).permute(1, 0, 2) #256,100,4
+        samples = dist.sample((n_samples,)).permute(1, 0, 2) #256,20,4
     pits = []
-    explained_var = torch.ones(dim) * (1/dim)
+    explained_var = np.ones(dim) * (1/dim)
     if prerank in ['mean', 'variance', 'dependency']:
         y_proj, samples_proj = get_prerank(y, samples, prerank)
         sorted_samples_proj = torch.sort(samples_proj, dim=1)[0] #256,100
@@ -111,7 +112,7 @@ def calculate_PIT(dist, y, n_samples, setup, prerank):
         log_densities_samples = torch.stack(log_densities_samples).permute(1,0)
         # log_densities_samples = dist.log_prob(samples)#256,100
         log_densities_y = dist.log_prob(y) #256
-        cdfs = (log_densities_samples <= log_densities_y.unsqueeze(1)).float().mean(dim=1) #256,1
+        cdfs = (log_densities_samples <= log_densities_y.unsqueeze(1)).float().mean(dim=1, keepdim=True) #256,1
         pits.append(cdfs)
     else:
         raise ValueError(f"Unknown prerank function: {prerank}")
@@ -133,20 +134,25 @@ def calculate_PIT(dist, y, n_samples, setup, prerank):
 
 #     return pits
 
-def pce(dist, y, n_samples = 1000, mode = 'all', prerank = 'pca', setup = 'real'):
+def pce(dist, y, n_samples = 100, prerank = 'pca', setup = 'real', mode = 'train'):
     alphas = torch.linspace(0, 1, 100, device=y.device)
     pit_values, _ = calculate_PIT(dist, y, n_samples = n_samples, setup = setup, prerank = prerank) #shape (4,256,1) or (1, 256,1)
     dim = pit_values.shape[0]
     pces = []
+    cdfs = []
     for d in range(dim):
         pits = pit_values[d].view(-1)  # shape: (256,)
         pits_sorted = pits.sort()[0]
         cdf_estimates = torch.searchsorted(pits_sorted, alphas, side='right') / pits_sorted.numel()
-        pce = torch.mean(torch.abs(cdf_estimates - alphas)).item()
+        pce = torch.mean(torch.abs(cdf_estimates - alphas))
         pces.append(pce)
-    if mode == 'average':
-        return sum(pces)/len(pces), _
-    elif mode == 'all':
-       return pces, _ #it returns a list with 4 values, pce corresponding to each PCA
-
-
+        cdfs.append(cdf_estimates)
+    pces = torch.stack(pces)
+    cdfs = torch.stack(cdfs)
+    if mode == 'train':
+        if prerank == 'pca':
+            explained_var = torch.from_numpy(_).to(pces.device)
+            return (pces * explained_var).sum()
+        else: return pces.mean()
+    else: return pces, cdfs, _
+    

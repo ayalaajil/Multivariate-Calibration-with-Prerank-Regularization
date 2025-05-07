@@ -14,6 +14,7 @@ config = get_config()
 config.device = 'cuda'
 M = 100
 alphas = torch.linspace(0, 1, M, device=config.device)
+data_type, data_name = 'mulan', 'rf2'
 # rc = RunConfig(config, 'mulan', 'rf2')
 #rc = RunConfig(config,'feldman', 'bio')
 rc = RunConfig(config,'mulan', 'scm20d')
