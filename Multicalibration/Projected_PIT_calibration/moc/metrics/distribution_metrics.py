@@ -72,8 +72,6 @@ def calculate_PIT(dist, y, n_samples, setup, prerank):
     batch_size, dim = y.shape
     if setup == 'simulated':
         samples = dist.sample((batch_size*n_samples,)).reshape(batch_size, n_samples, dim) #10000, 1000, 10
-        print("samples.shape")
-        print(samples.shape)
     else: 
         samples = dist.sample((n_samples,)).permute(1, 0, 2) #256,20,4
     pits = []
