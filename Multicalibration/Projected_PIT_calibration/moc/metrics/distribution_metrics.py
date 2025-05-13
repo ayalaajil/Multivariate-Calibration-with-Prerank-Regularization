@@ -155,6 +155,6 @@ def pce(dist, y, n_samples = 100, prerank = 'pca', setup = 'real', mode = 'train
         if prerank == 'pca':
             explained_var = torch.from_numpy(_).to(pces.device)
             return (pces * explained_var).sum()
-        else: return pces.mean()
+        else: return pces
     else: return pces, cdfs, _
     
