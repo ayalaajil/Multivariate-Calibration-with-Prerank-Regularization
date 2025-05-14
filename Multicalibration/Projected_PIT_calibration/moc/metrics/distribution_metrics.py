@@ -66,7 +66,7 @@ def multivariate_energy_score(dist, y, n_samples = 100):
     pairwise_dists = torch.linalg.vector_norm(s1.unsqueeze(2) - s2.unsqueeze(1), dim=-1)  # (256, 100, 100)
     term2 = 0.5 * pairwise_dists.mean(dim=(1, 2))  # (256,)
 
-    return (term1 - term2).mean()  # (256,)
+    return (term1 - term2).mean()
 
 def calculate_PIT(dist, y, n_samples, setup, prerank, tau = 100):
     batch_size, dim = y.shape
