@@ -151,8 +151,8 @@ class MixtureLightningModule(LightningModule):
         else:
             raise ValueError(f'Invalid loss: {self.hparams.loss}')
 
-        pce_score = pce(dist, y, n_samples = self.hparams.es_num_samples, prerank = self.hparams.prerank) #return a list of d elements
-
+        # pce_score = pce(dist, y, n_samples = self.hparams.es_num_samples, prerank = self.hparams.prerank) #return a list of d elements
+        pce_score = 0.0
         total_loss = loss_term + (self.hparams.lambda_reg * reg_val)
 
         return total_loss, loss_term, reg_val, pce_score

@@ -25,7 +25,7 @@ config = get_config()
 config.device = 'cuda'
 
 seeds = [0, 42, 866, 12, 4]
-# seeds = [42]
+# seeds = [42, 866]
 dataset_names = [['camehl', 'households'], 
                  ['cevid', 'air'], ['cevid', 'births1'],
                  ['cevid', 'births2'], ['cevid', 'wage'], ['mulan', 'scm20d'],
@@ -39,7 +39,7 @@ dataset_names = [['camehl', 'households'],
                  ['del_barrio', 'calcofi'], ['del_barrio', 'ansur2'], ['wang', 'taxi'], 
                  ['wang', 'energy'],
                  ]
-prerank = 'variance'
+prerank = 'pca'
 pce_across_datasets = {}
 for dataset in dataset_names:
     data_group, data_name = dataset
@@ -47,7 +47,7 @@ for dataset in dataset_names:
     for seed in seeds:
         print(f"working on dataset {data_group} {data_name} {prerank} seed {seed}")
         rc = RunConfig(config, data_group, data_name, seed=seed)
-        datamodule = RealDataModule(rc, seed=seed, num_workers = 16)
+        datamodule = RealDataModule(rc, seed=seed, num_workers = 8)
         p, q = datamodule.input_dim, datamodule.output_dim
         # model = GaussianLightningModule(p, q, lambda_reg = 1, reg_type = 'pce-kde', prerank = 'density')
         model = MixtureLightningModule(p, q, prerank = prerank)
@@ -58,22 +58,25 @@ for dataset in dataset_names:
         model.to(config.device)
         model.eval()
         pces = []
+        weights = []
         with torch.no_grad():
             for x, y in datamodule.val_dataloader():
                 x = x.to(config.device)
                 y = y.to(config.device)
                 dist = model.predict(x)
-                pce_values = pce(dist, y, n_samples = 100, prerank = prerank, setup='real')
+                pce_values, w = pce(dist, y, n_samples = 100, prerank = prerank, setup='real') #4
                 # cdf = reliability_plots(dist, y, n_samples = 100, prerank = 'marginal', setup = 'real')
                 pces.append(pce_values)
-                # weights.append(_)
+                weights.append(w)
         pce_total = torch.stack(pces).mean(dim=0)
-        pce_over_seeds.append(pce_total)
-    pce_over_seeds = torch.stack(pce_over_seeds)
+        weights_total = torch.stack(weights).mean(dim=0)
+        weighted_sum = torch.sum(pce_total * weights_total)
+        pce_over_seeds.append(weighted_sum)
+    pce_over_seeds = torch.stack(pce_over_seeds) #when marginal add .mean(dim=-1)
     avg_pce = pce_over_seeds.mean()
     stderr = pce_over_seeds.std() / np.sqrt(len(seeds))
     print(avg_pce.item(), stderr.item())
-    pce_across_datasets[data_name] = (avg_pce, stderr)
+    pce_across_datasets[data_name] = (avg_pce.item(), stderr.item())
 
 filename = f"pkl-files/pce_across_32datasets_mixnll_{prerank}.pkl"
 with open(filename, "wb") as f:
