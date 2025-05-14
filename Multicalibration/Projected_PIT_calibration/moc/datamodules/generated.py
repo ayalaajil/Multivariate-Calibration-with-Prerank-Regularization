@@ -13,7 +13,6 @@ class GeneratedDataModule(BaseDataModule):
             n_targets=self.rc.config.synthetic.n_targets,
             random_state=self.rc.seed
         )
-
         # Choose one generation mode
         if self.rc.config.synthetic.mode == "linear":
             X, Y = generator.linear_case(dependent_X=self.rc.config.synthetic.dependent_X)

@@ -94,7 +94,6 @@ def pce_kde_regularization(dist, y, prerank, n_samples = 100, M = 100, tau = 100
     pit_values, _ = calculate_PIT(dist, y, n_samples = n_samples, setup = 'real', prerank = prerank)  # (4, 256, 1)
     alphas = torch.linspace(0, 1, M, device=pit_values.device)  # (100,)
     dim = pit_values.shape[0]
-
     pce_kdes = []
     for d in range(dim):
         # Expand for broadcasting

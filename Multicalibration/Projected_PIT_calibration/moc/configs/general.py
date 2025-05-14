@@ -66,7 +66,7 @@ def general_config(config):
             precomputation_level=PrecomputationLevel.RESULTS,
 
             synthetic=dict(
-                n_samples=1000,
+                n_samples=10000,
                 n_features=20,
                 n_targets=3,
                 mode="linear",  # or "linear" or "latent"
