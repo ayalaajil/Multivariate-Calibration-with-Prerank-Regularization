@@ -71,9 +71,9 @@ def multivariate_energy_score(dist, y, n_samples = 100):
 def calculate_PIT(dist, y, n_samples, setup, prerank, tau = 100):
     batch_size, dim = y.shape
     if setup == 'simulated':
-        samples = dist.sample((batch_size*n_samples,)).reshape(batch_size, n_samples, dim) #10000, 1000, 10
+        samples = dist.sample((batch_size*n_samples,)).reshape(batch_size, n_samples, dim) #10000, 1000, 10  #HEEEERE rsample
     else: 
-        samples = dist.sample((n_samples,)).permute(1, 0, 2) #256,20,4
+        samples = dist.sample((n_samples,)).permute(1, 0, 2) #256,20,4 # HEEERE rsample
     pits = []
     explained_var = np.ones(dim) * (1/dim)
     if prerank in ['mean', 'variance', 'dependency']:
@@ -107,7 +107,13 @@ def calculate_PIT(dist, y, n_samples, setup, prerank, tau = 100):
             log_densities_samples.append(log_density) #256
         log_densities_samples = torch.stack(log_densities_samples).permute(1,0)
         log_densities_y = dist.log_prob(y) #256
+<<<<<<< HEAD
+        '''cdfs = (log_densities_samples <= log_densities_y.unsqueeze(1)).float().mean(dim=1, keepdim=True) #256,1'''
+        tau=1
+        cdfs =  torch.sigmoid(tau *(log_densities_y.unsqueeze(1) -log_densities_samples)).float().mean(dim=1, keepdim=True)
+=======
         cdfs = torch.sigmoid(tau * (log_densities_y.unsqueeze(-1) - log_densities_samples)).mean(dim=1, keepdim=True)
+>>>>>>> d75fde0a05a70ba4ceea4c0b1c081d5022d3d669
         pits.append(cdfs)
     else:
         raise ValueError(f"Unknown prerank function: {prerank}")

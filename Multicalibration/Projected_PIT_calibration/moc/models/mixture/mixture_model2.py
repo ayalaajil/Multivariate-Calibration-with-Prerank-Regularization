@@ -95,14 +95,18 @@ class MixtureLightningModule(LightningModule):
         loss: str = 'nll',
         mixture_size: int = 5,
         es_num_samples: int = 100,
-        lr=1e-4,
+        lr=1e-4, #was 1e-4 BEFORE
         lambda_reg: float = 0.0,
         reg_type: str = 'none',
         prerank: str = 'none'
     ):
         super().__init__()
         self.save_hyperparameters()
+<<<<<<< HEAD
+        wandb.init(project="multicalibration", group="scm1d/pce-kde",name="lambda=15, tau=100, lr= 1e-4")
+=======
         # wandb.init(project="multicalibration")
+>>>>>>> d75fde0a05a70ba4ceea4c0b1c081d5022d3d669
 
         output_dim = output_dim
         mixture_size = self.hparams.mixture_size
@@ -123,6 +127,11 @@ class MixtureLightningModule(LightningModule):
         self.validation_step_outputs = []
         self.train_step_outputs = []
 
+        self.recent_losses = []
+        self.regularization_active = True #HERE
+        self.stabilization_patience = 5
+        self.stabilization_threshold = 1e-1 
+
     def forward(self, x):
         out = self.model(x) #(batch_size, 75)
         out = out.split(self.output_shape, dim=-1) #(batch_size, 5), (batch_size, 20), (batch_size, 50)
@@ -139,10 +148,11 @@ class MixtureLightningModule(LightningModule):
     def compute_loss(self, dist, y):
 
         reg_val = 0.0  # raw reg
-        if self.hparams.reg_type == 'truncation':
-            reg_val = truncation_regularization(dist, y)
-        elif self.hparams.reg_type == 'pce-kde':
-            reg_val = pce_kde_regularization(dist, y, n_samples = self.hparams.es_num_samples, prerank = self.hparams.prerank)
+        if self.regularization_active:
+            if self.hparams.reg_type == 'truncation':
+                reg_val = truncation_regularization(dist, y)
+            elif self.hparams.reg_type == 'pce-kde':
+                reg_val = pce_kde_regularization(dist, y, n_samples = self.hparams.es_num_samples, prerank = self.hparams.prerank)
 
         if self.hparams.loss == 'nll':
             loss_term = -dist.log_prob(y).mean()
@@ -227,6 +237,52 @@ class MixtureLightningModule(LightningModule):
         # })
         return total_loss
     
+<<<<<<< HEAD
+    def on_validation_epoch_end(self):
+        total_losses = []
+        raw_regs = []
+        nlls = []
+        pce_scores = []
+
+        for out in self.validation_step_outputs:
+            total_losses.append(float(out["total_loss"]))
+            raw_regs.append(float(out["raw_reg"]))
+            nlls.append(np.array(out["nll"]))
+            pce_scores.append(np.array(out["pce_score"]))  # shape: (d,)
+
+        avg_total_loss = np.mean(total_losses)
+        avg_raw_reg = np.mean(raw_regs)
+        avg_nll_score = np.mean(nlls)
+        avg_pce = np.mean(pce_scores)
+
+        # Build log dictionary
+        log_dict = {
+            "val/total_loss": avg_total_loss,
+            "val/raw_reg": avg_raw_reg,
+            "val/nll": avg_nll_score,
+            "val/pce": avg_pce,
+        }
+
+        # Update recent_losses and check for stabilization
+        self.recent_losses.append(avg_nll_score) 
+
+        '''if len(self.recent_losses) >= self.stabilization_patience:
+            diffs = np.diff(self.recent_losses[-self.stabilization_patience:])
+            max_decrease = max(abs(d) for d in diffs)
+            if max_decrease < self.stabilization_threshold:
+                self.regularization_active = True
+                log.info(f"Regularization activated at epoch {self.current_epoch}. Max recent change in loss: {max_decrease}")'''
+
+        # Add each dimension of the PCE score
+        # for i, val in enumerate(avg_pce_score):
+        #     log_dict[f"val/pce_dim_{i+1}"] = val
+
+        # Log to W&B
+        wandb.log(log_dict)
+
+        # Clear for next epoch
+        self.validation_step_outputs.clear()
+=======
     # def on_validation_epoch_end(self):
     #     total_losses = []
     #     raw_regs = []
@@ -261,6 +317,7 @@ class MixtureLightningModule(LightningModule):
 
     #     # Clear for next epoch
     #     self.validation_step_outputs.clear()
+>>>>>>> d75fde0a05a70ba4ceea4c0b1c081d5022d3d669
 
     def configure_optimizers(self):
         return torch.optim.Adam(params=self.parameters(), lr=self.hparams.lr)

@@ -46,7 +46,7 @@ def get_lightning_trainer(rc):
         mode='min',
         patience=15,
         min_delta=1e-4,
-        verbose = False,
+        verbose = True,
     )
 
     callbacks = [ckpt, es, CustomLogger()]
