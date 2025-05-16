@@ -107,13 +107,7 @@ def calculate_PIT(dist, y, n_samples, setup, prerank, tau = 100):
             log_densities_samples.append(log_density) #256
         log_densities_samples = torch.stack(log_densities_samples).permute(1,0)
         log_densities_y = dist.log_prob(y) #256
-<<<<<<< HEAD
-        '''cdfs = (log_densities_samples <= log_densities_y.unsqueeze(1)).float().mean(dim=1, keepdim=True) #256,1'''
-        tau=1
-        cdfs =  torch.sigmoid(tau *(log_densities_y.unsqueeze(1) -log_densities_samples)).float().mean(dim=1, keepdim=True)
-=======
-        cdfs = torch.sigmoid(tau * (log_densities_y.unsqueeze(-1) - log_densities_samples)).mean(dim=1, keepdim=True)
->>>>>>> d75fde0a05a70ba4ceea4c0b1c081d5022d3d669
+        cdfs =  torch.sigmoid(tau *(log_densities_y.unsqueeze(1) -log_densities_samples)).mean(dim=1, keepdim=True)
         pits.append(cdfs)
     else:
         raise ValueError(f"Unknown prerank function: {prerank}")

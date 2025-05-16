@@ -26,20 +26,23 @@ config.device = 'cuda'
 
 seeds = [0, 42, 866, 12, 4]
 # seeds = [42, 866]
-dataset_names = [['camehl', 'households'], 
-                 ['cevid', 'air'], ['cevid', 'births1'],
-                 ['cevid', 'births2'], ['cevid', 'wage'], ['mulan', 'scm20d'],
-                 ['mulan', 'rf2'], ['mulan', 'rf1'], ['mulan', 'scm1d'],
-                 ['mulan', 'atp1d'], ['mulan', 'atp7d'], ['mulan', 'oes97'],
-                 ['mulan', 'oes10'], ['mulan', 'jura'], ['mulan', 'sf1'],
-                 ['mulan', 'sf2'], ['mulan', 'wq'], ['mulan', 'enb'],
-                 ['mulan', 'slump'], ['mulan', 'osales'], ['mulan', 'scpf'], 
-                 ['feldman', 'meps_21'], ['feldman', 'meps_19'], ['feldman', 'meps_20'], 
-                 ['feldman', 'house'], ['feldman', 'bio'], ['feldman', 'blog_data'], 
-                 ['del_barrio', 'calcofi'], ['del_barrio', 'ansur2'], ['wang', 'taxi'], 
-                 ['wang', 'energy'],
+dataset_names = [
+                #  ['camehl', 'households'], 
+                #  ['cevid', 'air'], ['cevid', 'births1'],
+                #  ['cevid', 'births2'], ['cevid', 'wage'], ['mulan', 'scm20d'],
+                #  ['mulan', 'rf2'], ['mulan', 'rf1'], ['mulan', 'scm1d'],
+                #  ['mulan', 'atp1d'], ['mulan', 'atp7d'], ['mulan', 'oes97'],
+                #  ['mulan', 'oes10'], ['mulan', 'jura'], ['mulan', 'sf1'],
+                #  ['mulan', 'sf2'], ['mulan', 'wq'], ['mulan', 'enb'],
+                #  ['mulan', 'slump'], 
+                 ['mulan', 'osales'], 
+                #  ['mulan', 'scpf'], 
+                #  ['feldman', 'meps_21'], ['feldman', 'meps_19'], ['feldman', 'meps_20'], 
+                #  ['feldman', 'house'], ['feldman', 'bio'], ['feldman', 'blog_data'], 
+                #  ['del_barrio', 'calcofi'], ['del_barrio', 'ansur2'], ['wang', 'taxi'], 
+                #  ['wang', 'energy'],
                  ]
-prerank = 'pca'
+prerank = 'mean'
 pce_across_datasets = {}
 for dataset in dataset_names:
     data_group, data_name = dataset
@@ -58,20 +61,20 @@ for dataset in dataset_names:
         model.to(config.device)
         model.eval()
         pces = []
-        weights = []
+        # weights = []
         with torch.no_grad():
             for x, y in datamodule.val_dataloader():
                 x = x.to(config.device)
                 y = y.to(config.device)
                 dist = model.predict(x)
-                pce_values, w = pce(dist, y, n_samples = 100, prerank = prerank, setup='real') #4
+                pce_values = pce(dist, y, n_samples = 100, prerank = prerank, setup='real') #4
                 # cdf = reliability_plots(dist, y, n_samples = 100, prerank = 'marginal', setup = 'real')
                 pces.append(pce_values)
-                weights.append(w)
+                # weights.append(w)
         pce_total = torch.stack(pces).mean(dim=0)
-        weights_total = torch.stack(weights).mean(dim=0)
-        weighted_sum = torch.sum(pce_total * weights_total)
-        pce_over_seeds.append(weighted_sum)
+        # weights_total = torch.stack(weights).mean(dim=0)
+        # weighted_sum = torch.sum(pce_total * weights_total)
+        pce_over_seeds.append(pce_total)
     pce_over_seeds = torch.stack(pce_over_seeds) #when marginal add .mean(dim=-1)
     avg_pce = pce_over_seeds.mean()
     stderr = pce_over_seeds.std() / np.sqrt(len(seeds))

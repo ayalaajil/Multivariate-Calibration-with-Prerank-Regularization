@@ -4,6 +4,7 @@ from lightning.pytorch.callbacks import (
     EarlyStopping,
     ModelCheckpoint,
 )
+import torch
 
 class CustomLogger(Callback):
     def __init__(self):
@@ -46,7 +47,7 @@ def get_lightning_trainer(rc):
         mode='min',
         patience=15,
         min_delta=1e-4,
-        verbose = True,
+        verbose = False,
     )
 
     callbacks = [ckpt, es, CustomLogger()]
@@ -58,7 +59,7 @@ def get_lightning_trainer(rc):
 
     return Trainer(
         accelerator=accelerator,
-        devices=1,
+        devices= 1,
         min_epochs=1,
         max_epochs=2 if rc.config.fast else 5000,
         # number of validation steps to execute at the beginning of the training

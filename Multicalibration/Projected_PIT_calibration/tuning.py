@@ -6,10 +6,14 @@ from moc.datamodules.real_datamodule import RealDataModule
 from moc.metrics.distribution_metrics import pce, multivariate_energy_score
 import numpy as np
 import torch
-import pickle
 import optuna
 from functools import partial
 import wandb
+import os
+
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "6"
+
 
 class EnergyConstraintCallback:
     def __init__(self):
@@ -31,7 +35,7 @@ class EnergyConstraintCallback:
 
 
 def objective(trial, config, data_group, data_name, seed, prerank):
-    lambda_reg = trial.suggest_float("lambda_reg", 1e-3, 100.0, log=True)
+    lambda_reg = trial.suggest_float("lambda_reg", 1e-3, 10.0, log=True)
 
     rc = RunConfig(config, data_group, data_name, seed=seed)
     datamodule = RealDataModule(rc, seed=seed, num_workers=8)
@@ -77,10 +81,10 @@ def objective(trial, config, data_group, data_name, seed, prerank):
 
     # Log metrics to W&B
     wandb.log({
-    "lambda_reg": lambda_reg,
-    "pce": pce_total.item(),
-    "nll": nll_mean,
-    "energy": energy_total.item()
+        "lambda_reg": lambda_reg,
+        "pce": pce_total.item(),
+        "nll": nll_mean,
+        "energy": energy_total.item()
     })
 
 
@@ -88,23 +92,25 @@ def objective(trial, config, data_group, data_name, seed, prerank):
     trial.set_user_attr("energy", energy_total.item())
     return pce_total.item()
 
-wandb_run = wandb.init(
-    project="multicalibration-hparam-tuning",
-    name="optuna_tuning_curve",
-    config={"search_space": {"lambda_reg": [1e-4, 100.0]}}
-)
-
 callback = EnergyConstraintCallback()
 config = get_config()
 config.device = 'cuda'
-data_group, data_name = ['camehl', 'households']
+data_group, data_name = ['mulan', 'osales']
 seed = 42
 prerank = 'marginal'
+
+wandb_run = wandb.init(
+    project="multicalibration-hparam-tuning",
+    name=f"{data_name}_{prerank}",
+    config={"search_space": {"lambda_reg": [1e-4, 10.0]}}
+)
+
 wrapped_objective = partial(objective, config=config, data_group=data_group, 
                             data_name=data_name, seed=seed, prerank=prerank)
 
 study = optuna.create_study(direction="minimize")
 study.optimize(wrapped_objective, n_trials=40, callbacks=[callback])
+
 wandb_run.finish()
 
 print("Best lambda_reg:", study.best_params["lambda_reg"])
