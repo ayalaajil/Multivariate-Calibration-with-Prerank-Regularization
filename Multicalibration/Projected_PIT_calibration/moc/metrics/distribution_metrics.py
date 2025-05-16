@@ -68,26 +68,23 @@ def multivariate_energy_score(dist, y, n_samples = 100):
 
     return (term1 - term2).mean()
 
-def calculate_PIT(dist, y, n_samples, setup, prerank):
+def calculate_PIT(dist, y, n_samples, setup, prerank, tau = 100):
     batch_size, dim = y.shape
     if setup == 'simulated':
-        samples = dist.sample((batch_size*n_samples,)).reshape(batch_size, n_samples, dim) #10000, 1000, 10  #HEEEERE rsample
+        samples = dist.sample((batch_size*n_samples,)).reshape(batch_size, n_samples, dim) #10000, 1000, 10
     else: 
-        samples = dist.sample((n_samples,)).permute(1, 0, 2) #256,20,4 # HEEERE rsample
+        samples = dist.sample((n_samples,)).permute(1, 0, 2) #256,20,4
     pits = []
     explained_var = np.ones(dim) * (1/dim)
     if prerank in ['mean', 'variance', 'dependency']:
         y_proj, samples_proj = get_prerank(y, samples, prerank)
-        sorted_samples_proj = torch.sort(samples_proj, dim=1)[0] #256,100
-        cdfs = torch.searchsorted(sorted_samples_proj, y_proj.unsqueeze(-1), side='right') / n_samples #256,1
+        cdfs = torch.sigmoid(tau *(y_proj.unsqueeze(-1) - samples_proj)).mean(dim=1, keepdim=True)
         pits.append(cdfs)
     elif prerank == 'marginal':
         for d in range(dim):
             dsample = samples[:,:,d] #256,100
             dy = y[:,d] #256
-            dsample_sorted = torch.sort(dsample, dim=1)[0]
-            cdfs = torch.searchsorted(dsample_sorted.contiguous(), 
-                                      dy.unsqueeze(-1).contiguous(), side='right') / n_samples #256,1
+            cdfs =  torch.sigmoid(tau *(dy.unsqueeze(-1) - dsample)).mean(dim=1, keepdim=True)
             pits.append(cdfs)
     elif prerank == 'pca':
         samples_np = samples.detach().cpu().numpy().reshape(-1, y.shape[1])
@@ -99,9 +96,7 @@ def calculate_PIT(dist, y, n_samples, setup, prerank):
             u = vectors[d]
             sample_proj = torch.matmul(samples, u) # 256,100,1
             y_proj = torch.matmul(y, u) #256,1
-            sample_sorted = torch.sort(sample_proj, dim=1)[0] #256,100 sort across the columns
-            cdfs = torch.searchsorted(sample_sorted.contiguous(), 
-                                      y_proj.unsqueeze(-1).contiguous(), side='right') / n_samples #256,1
+            cdfs =  torch.sigmoid(tau *(y_proj.unsqueeze(-1) - sample_proj)).mean(dim=1, keepdim=True)
             pits.append(cdfs)
     elif prerank =='density':
         #samples are of shape 256, 100, 4
@@ -112,7 +107,7 @@ def calculate_PIT(dist, y, n_samples, setup, prerank):
         log_densities_samples = torch.stack(log_densities_samples).permute(1,0)
         # log_densities_samples = dist.log_prob(samples)#256,100
         log_densities_y = dist.log_prob(y) #256
-        cdfs =  torch.sigmoid(tau *(log_densities_y.unsqueeze(1) -log_densities_samples)).mean(dim=1, keepdim=True)
+        cdfs =  torch.sigmoid(tau *(log_densities_y.unsqueeze(-1) -log_densities_samples)).mean(dim=1, keepdim=True)
         pits.append(cdfs)
     else:
         raise ValueError(f"Unknown prerank function: {prerank}")

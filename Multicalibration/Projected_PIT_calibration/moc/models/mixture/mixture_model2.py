@@ -101,7 +101,7 @@ class MixtureLightningModule(LightningModule):
     ):
         super().__init__()
         self.save_hyperparameters()
-        # wandb.init(project="multicalibration", group="scm1d/pce-kde",name="lambda=15, tau=100, lr= 1e-4")
+        # wandb.init(project="multicalibration")
 
         output_dim = output_dim
         mixture_size = self.hparams.mixture_size
