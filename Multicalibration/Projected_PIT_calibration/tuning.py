@@ -13,31 +13,28 @@ import wandb
 import csv
 import os
 
-<<<<<<< HEAD
-class CRPSConstraintCallback:
+'''class NLLConstraintCallback:
     def __init__(self):
-        self.base_crps = None  # Will store CRPS without regularization
+        self.nll_min = float('inf')
+        self.nll_max = float('-inf')
 
-    def __call__(self, trial):
-        crps = trial.user_attrs.get("crps")
-        if crps is None:
+    def __call__(self, study, trial):
+        nll = trial.user_attrs.get("nll")
+        if nll is None:
             return
 
-        # Capture baseline CRPS (i.e., with lambda=0 or close to 0)
-        lambda_reg = trial.params.get("lambda_reg", None)
-        if lambda_reg is not None and lambda_reg < 1e-6:
-            if self.base_crps is None or crps < self.base_crps:
-                self.base_crps = crps
-            return
+        # Update min and max
+        self.nll_min = min(self.nll_min, nll)
+        self.nll_max = max(self.nll_max, nll)
 
-        # If base_crps is known, enforce constraint
-        if self.base_crps is not None:
-            threshold = self.base_crps * 1.1
-            if crps > threshold:
-                trial.set_user_attr("constraint_violation", True)
+        # Compute dynamic threshold
+        if self.nll_max > self.nll_min:
+            threshold = self.nll_min + 0.5 * (self.nll_max - self.nll_min)
+            if nll > threshold:
+                trial.set_user_attr("constraint_violation_nll", True)
                 trial.report(float('inf'), step=0)
                 raise optuna.exceptions.TrialPruned()
-=======
+
 class EnergyConstraintCallback:
     def __init__(self):
         self.best_energy = float('inf')
@@ -54,12 +51,11 @@ class EnergyConstraintCallback:
         if energy > threshold:
             trial.set_user_attr("constraint_violation", True)
             trial.report(float('inf'), step=0)  # mark as unpromising
-            raise optuna.exceptions.TrialPruned()
->>>>>>> 81dac3f117e71497e92c189925c6263957511969
+            raise optuna.exceptions.TrialPruned()'''
 
 
 def objective(trial, config, data_group, data_name, seed, prerank):
-    lambda_reg = trial.suggest_float("lambda_reg", 1e-3, 100.0, log=True)
+    lambda_reg = trial.suggest_float("lambda_reg", 1e-3, 10.0, log=True)
 
     rc = RunConfig(config, data_group, data_name, seed=seed)
     datamodule = RealDataModule(rc, seed=seed, num_workers=8)
@@ -78,12 +74,7 @@ def objective(trial, config, data_group, data_name, seed, prerank):
     model.to(config.device)
     model.eval()
 
-<<<<<<< HEAD
-    pces, nlls, crps_vals = [], [], []
-=======
-    # pces, weights, nlls = [], [], []
     pces, nlls, energies = [], [], []
->>>>>>> 81dac3f117e71497e92c189925c6263957511969
 
     with torch.no_grad():
         for x, y in datamodule.val_dataloader():
@@ -92,28 +83,14 @@ def objective(trial, config, data_group, data_name, seed, prerank):
             dist = model.predict(x)
             # pce_values, w = pce(dist, y, n_samples=100, prerank=prerank, setup='real')
             pce_values = pce(dist, y, n_samples=100, prerank=prerank, setup='real')
-<<<<<<< HEAD
-=======
             nll = -dist.log_prob(y).mean().item()
             energy = multivariate_energy_score(dist, y)
->>>>>>> 81dac3f117e71497e92c189925c6263957511969
             pces.append(pce_values)
 
             # NLL
             nll = -dist.log_prob(y).mean().item()
             nlls.append(nll)
             energies.append(energy)
-
-            # CRPS
-            samples = dist.sample((100,))  # shape (100, batch, d)
-            samples = samples.permute(1, 0, 2)  # shape (batch, 100, d)
-
-            if q == 1:
-                crps_batch = torch.tensor([
-                    crps_ensemble(y[i].cpu().numpy(), samples[i][:, 0].cpu().numpy())
-                    for i in range(len(y))
-                ])
-                crps_vals.append(crps_batch.mean().item())
 
     pce_total = torch.stack(pces).mean(dim=0)
     energy_total = torch.stack(energies).mean(dim=0)
@@ -122,103 +99,29 @@ def objective(trial, config, data_group, data_name, seed, prerank):
     # weights_total = torch.stack(weights).mean(dim=0)
     # weighted_sum = torch.sum(pce_total * weights_total).item()
     nll_mean = np.mean(nlls)
-    crps_mean = np.mean(crps_vals) if len(crps_vals) > 0 else float('inf')
+    # crps_mean = np.mean(crps_vals) if len(crps_vals) > 0 else float('inf')
 
     # Log metrics to W&B
     wandb.log({
     "lambda_reg": lambda_reg,
-<<<<<<< HEAD
-    "pce_weighted_sum": pce_total.item(),
-    "nll_mean": nll_mean,
-    "crps_mean": crps_mean,
-=======
     "pce": pce_total.item(),
     "nll": nll_mean,
     "energy": energy_total.item()
->>>>>>> 81dac3f117e71497e92c189925c6263957511969
     })
 
 
     # Log both to the trial
-<<<<<<< HEAD
     trial.set_user_attr("nll", nll_mean)
-    trial.set_user_attr("crps", crps_mean)
-    return pce_total.item()
 
-
-dataset_names = [
-      ['camehl', 'households'],
-                   ['mulan', 'scm20d'],
-    #              ['mulan', 'rf2'],
-    #              ['mulan', 'rf1'],
-    #              ['mulan', 'scm1d'],
-    #              ['feldman', 'meps_21'],
-    #              ['feldman', 'meps_19'],
-    #              ['feldman', 'meps_20'],
-    #              ['feldman', 'house'],
-    #              ['feldman', 'bio'],
-    #              ['feldman', 'blog_data'],
-    #             ['del_barrio', 'calcofi'],
-    #             ['wang', 'taxi']
-                 ]
-seeds = [0, 42, 866, 12, 4]
-
-# Chemin vers le fichier CSV
-csv_path = "best_lambda.csv"
-
-# Écrire l'en-tête si le fichier n'existe pas encore
-if not os.path.exists(csv_path):
-    with open(csv_path, mode="w", newline="") as file:
-        writer = csv.writer(file)
-        writer.writerow(["data_group", "data_name", "best_lambda_reg", "best_PCE", "best_NLL", "best_CRPS"])
-
-for dataset in dataset_names:
-    data_group, data_name = dataset
-    print(f"Working on dataset {data_name}")
-
-    wandb_run = wandb.init(
-        project="multicalibration-hparam-tuning",
-        name=f"optuna_tuning_curve_{data_name}",
-        config={"search_space": {"lambda_reg": [1e-4, 100.0]}}
-    )
-
-    callback = CRPSConstraintCallback()
-    config = get_config()
-    config.device ="cuda"
-    seed = 42
-    prerank = 'marginal'
-
-    wrapped_objective = partial(objective, config=config, data_group=data_group, 
-                                data_name=data_name, seed=seed, prerank=prerank)
-    study = optuna.create_study(direction="minimize")
-    study.optimize(wrapped_objective, n_trials=30, callbacks=[callback])
-
-    best_lambda = study.best_params["lambda_reg"]
-    best_pce = study.best_value
-    best_trial = study.best_trial
-    best_nll = best_trial.user_attrs["nll"]
-    best_crps = best_trial.user_attrs["crps"]
-
-    print("Best lambda_reg:", best_lambda)
-    print("Best PCE:", best_pce)
-    print("Corresponding NLL:", best_nll)
-    print("Corresponding CRPS:", best_crps)
-
-    # Ajouter les résultats au CSV
-    with open(csv_path, mode="a", newline="") as file:
-        writer = csv.writer(file)
-        writer.writerow([data_group, data_name, best_lambda, best_pce, best_nll, best_crps])
-=======
     trial.set_user_attr("energy", energy_total.item())
     return pce_total.item()
 
 wandb_run = wandb.init(
     project="multicalibration-hparam-tuning",
     name="optuna_tuning_curve",
-    config={"search_space": {"lambda_reg": [1e-4, 100.0]}}
+    config={"search_space": {"lambda_reg": [1e-4, 10.0]}}
 )
 
-callback = EnergyConstraintCallback()
 config = get_config()
 config.device = 'cuda'
 data_group, data_name = ['camehl', 'households']
@@ -227,11 +130,34 @@ prerank = 'marginal'
 wrapped_objective = partial(objective, config=config, data_group=data_group, 
                             data_name=data_name, seed=seed, prerank=prerank)
 
-study = optuna.create_study(direction="minimize")
-study.optimize(wrapped_objective, n_trials=40, callbacks=[callback])
+sampler = optuna.samplers.TPESampler(seed=seed)
+'''study = optuna.create_study(direction="minimize", sampler=sampler)
+study.optimize(wrapped_objective, n_trials=40, callbacks=[nll_callback])
 wandb_run.finish()
 
 print("Best lambda_reg:", study.best_params["lambda_reg"])
 print("Best PCE:", study.best_value)
-print("Corresponding Energy:", study.best_trial.user_attrs["energy"])
->>>>>>> 81dac3f117e71497e92c189925c6263957511969
+print("Corresponding Energy:", study.best_trial.user_attrs["energy"])'''
+
+
+study = optuna.create_study(direction="minimize", sampler=sampler)
+study.optimize(wrapped_objective, n_trials=40)  # no more callbacks here
+
+wandb_run.finish()
+
+# Post-processing : selection of best compromise PCE + constraint on NLL
+all_trials = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
+
+# Find minimal NLL
+min_nll = min(t.user_attrs["nll"] for t in all_trials)
+nll_threshold = min_nll + 0.5 * (max(t.user_attrs["nll"] for t in all_trials) - min_nll)
+
+admissible_trials = [t for t in all_trials if t.user_attrs["nll"] <= nll_threshold]
+
+best_trial = min(admissible_trials, key=lambda t: t.value)
+
+print("Best lambda_reg (under constraint):", best_trial.params["lambda_reg"])
+print("Best PCE (under constraint):", best_trial.value)
+print("Corresponding NLL:", best_trial.user_attrs["nll"])
+print("Corresponding Energy:", best_trial.user_attrs["energy"])
+
