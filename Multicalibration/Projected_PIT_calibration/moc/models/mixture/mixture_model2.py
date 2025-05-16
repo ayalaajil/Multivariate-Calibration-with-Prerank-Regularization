@@ -101,7 +101,7 @@ class MixtureLightningModule(LightningModule):
     ):
         super().__init__()
         self.save_hyperparameters()
-        # wandb.init(project="multicalibration")
+        # wandb.init(project="multicalibration", group="scm1d/pce-kde",name="lambda=15, tau=100, lr= 1e-4")
 
         output_dim = output_dim
         mixture_size = self.hparams.mixture_size
@@ -256,6 +256,16 @@ class MixtureLightningModule(LightningModule):
     #         "val/nll": avg_nll_score,
     #         "val/pce": avg_pce,
     #     }
+
+    #     # Update recent_losses and check for stabilization
+    #     self.recent_losses.append(avg_nll_score) 
+
+    #     '''if len(self.recent_losses) >= self.stabilization_patience:
+    #         diffs = np.diff(self.recent_losses[-self.stabilization_patience:])
+    #         max_decrease = max(abs(d) for d in diffs)
+    #         if max_decrease < self.stabilization_threshold:
+    #             self.regularization_active = True
+    #             log.info(f"Regularization activated at epoch {self.current_epoch}. Max recent change in loss: {max_decrease}")'''
 
     #     # Add each dimension of the PCE score
     #     # for i, val in enumerate(avg_pce_score):

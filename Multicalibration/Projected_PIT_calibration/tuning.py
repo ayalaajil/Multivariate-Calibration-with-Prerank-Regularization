@@ -11,9 +11,30 @@ from functools import partial
 import wandb
 import os
 
-import os
 os.environ["CUDA_VISIBLE_DEVICES"] = "6"
 
+
+'''class NLLConstraintCallback:
+    def __init__(self):
+        self.nll_min = float('inf')
+        self.nll_max = float('-inf')
+
+    def __call__(self, study, trial):
+        nll = trial.user_attrs.get("nll")
+        if nll is None:
+            return
+
+        # Update min and max
+        self.nll_min = min(self.nll_min, nll)
+        self.nll_max = max(self.nll_max, nll)
+
+        # Compute dynamic threshold
+        if self.nll_max > self.nll_min:
+            threshold = self.nll_min + 0.5 * (self.nll_max - self.nll_min)
+            if nll > threshold:
+                trial.set_user_attr("constraint_violation_nll", True)
+                trial.report(float('inf'), step=0)
+                raise optuna.exceptions.TrialPruned()
 
 class EnergyConstraintCallback:
     def __init__(self):
@@ -31,7 +52,7 @@ class EnergyConstraintCallback:
         if energy > threshold:
             trial.set_user_attr("constraint_violation", True)
             trial.report(float('inf'), step=0)  # mark as unpromising
-            raise optuna.exceptions.TrialPruned()
+            raise optuna.exceptions.TrialPruned()'''
 
 
 def objective(trial, config, data_group, data_name, seed, prerank):
@@ -54,7 +75,6 @@ def objective(trial, config, data_group, data_name, seed, prerank):
     model.to(config.device)
     model.eval()
 
-    # pces, weights, nlls = [], [], []
     pces, nlls, energies = [], [], []
 
     with torch.no_grad():
@@ -67,7 +87,9 @@ def objective(trial, config, data_group, data_name, seed, prerank):
             nll = -dist.log_prob(y).mean().item()
             energy = multivariate_energy_score(dist, y)
             pces.append(pce_values)
-            # weights.append(w)
+
+            # NLL
+            nll = -dist.log_prob(y).mean().item()
             nlls.append(nll)
             energies.append(energy)
 
@@ -78,6 +100,7 @@ def objective(trial, config, data_group, data_name, seed, prerank):
     # weights_total = torch.stack(weights).mean(dim=0)
     # weighted_sum = torch.sum(pce_total * weights_total).item()
     nll_mean = np.mean(nlls)
+    # crps_mean = np.mean(crps_vals) if len(crps_vals) > 0 else float('inf')
 
     # Log metrics to W&B
     wandb.log({
@@ -89,10 +112,17 @@ def objective(trial, config, data_group, data_name, seed, prerank):
 
 
     # Log both to the trial
+    trial.set_user_attr("nll", nll_mean)
+
     trial.set_user_attr("energy", energy_total.item())
     return pce_total.item()
 
-callback = EnergyConstraintCallback()
+wandb_run = wandb.init(
+    project="multicalibration-hparam-tuning",
+    name="optuna_tuning_curve",
+    config={"search_space": {"lambda_reg": [1e-4, 10.0]}}
+)
+
 config = get_config()
 config.device = 'cuda'
 data_group, data_name = ['mulan', 'osales']
@@ -108,11 +138,34 @@ wandb_run = wandb.init(
 wrapped_objective = partial(objective, config=config, data_group=data_group, 
                             data_name=data_name, seed=seed, prerank=prerank)
 
-study = optuna.create_study(direction="minimize")
-study.optimize(wrapped_objective, n_trials=40, callbacks=[callback])
-
+# sampler = optuna.samplers.TPESampler(seed=seed)
+'''study = optuna.create_study(direction="minimize", sampler=sampler)
+study.optimize(wrapped_objective, n_trials=40, callbacks=[nll_callback])
 wandb_run.finish()
 
 print("Best lambda_reg:", study.best_params["lambda_reg"])
 print("Best PCE:", study.best_value)
-print("Corresponding Energy:", study.best_trial.user_attrs["energy"])
+print("Corresponding Energy:", study.best_trial.user_attrs["energy"])'''
+
+
+study = optuna.create_study(direction="minimize")
+study.optimize(wrapped_objective, n_trials=40)  # no more callbacks here
+
+wandb_run.finish()
+
+# Post-processing : selection of best compromise PCE + constraint on NLL
+all_trials = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
+
+# Find minimal NLL
+min_nll = min(t.user_attrs["nll"] for t in all_trials)
+nll_threshold = min_nll + 0.5 * (max(t.user_attrs["nll"] for t in all_trials) - min_nll)
+
+admissible_trials = [t for t in all_trials if t.user_attrs["nll"] <= nll_threshold]
+
+best_trial = min(admissible_trials, key=lambda t: t.value)
+
+print("Best lambda_reg (under constraint):", best_trial.params["lambda_reg"])
+print("Best PCE (under constraint):", best_trial.value)
+print("Corresponding NLL:", best_trial.user_attrs["nll"])
+print("Corresponding Energy:", best_trial.user_attrs["energy"])
+

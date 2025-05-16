@@ -68,7 +68,7 @@ def multivariate_energy_score(dist, y, n_samples = 100):
 
     return (term1 - term2).mean()
 
-def calculate_PIT(dist, y, n_samples, setup, prerank, tau = 100):
+def calculate_PIT(dist, y, n_samples, setup, prerank):
     batch_size, dim = y.shape
     if setup == 'simulated':
         samples = dist.sample((batch_size*n_samples,)).reshape(batch_size, n_samples, dim) #10000, 1000, 10  #HEEEERE rsample
@@ -78,13 +78,16 @@ def calculate_PIT(dist, y, n_samples, setup, prerank, tau = 100):
     explained_var = np.ones(dim) * (1/dim)
     if prerank in ['mean', 'variance', 'dependency']:
         y_proj, samples_proj = get_prerank(y, samples, prerank)
-        cdfs = torch.sigmoid(tau * (y_proj.unsqueeze(-1) - samples_proj)).mean(dim=1, keepdim=True)
+        sorted_samples_proj = torch.sort(samples_proj, dim=1)[0] #256,100
+        cdfs = torch.searchsorted(sorted_samples_proj, y_proj.unsqueeze(-1), side='right') / n_samples #256,1
         pits.append(cdfs)
     elif prerank == 'marginal':
         for d in range(dim):
             dsample = samples[:,:,d] #256,100
             dy = y[:,d] #256
-            cdfs = torch.sigmoid(tau * (dy.unsqueeze(-1) - dsample)).mean(dim=1, keepdim=True)
+            dsample_sorted = torch.sort(dsample, dim=1)[0]
+            cdfs = torch.searchsorted(dsample_sorted.contiguous(), 
+                                      dy.unsqueeze(-1).contiguous(), side='right') / n_samples #256,1
             pits.append(cdfs)
     elif prerank == 'pca':
         samples_np = samples.detach().cpu().numpy().reshape(-1, y.shape[1])
@@ -94,10 +97,11 @@ def calculate_PIT(dist, y, n_samples, setup, prerank, tau = 100):
         explained_var = pca.explained_variance_ratio_ #array of len 4
         for d in range(dim):
             u = vectors[d]
-            sample_proj = torch.matmul(samples, u) # 256,100
-            y_proj = torch.matmul(y, u) #256
-            # print(f"samples shape {sample_proj.shape} y shape {y_proj.shape}")
-            cdfs = torch.sigmoid(tau * (y_proj.unsqueeze(-1) - sample_proj)).mean(dim=1, keepdim=True)
+            sample_proj = torch.matmul(samples, u) # 256,100,1
+            y_proj = torch.matmul(y, u) #256,1
+            sample_sorted = torch.sort(sample_proj, dim=1)[0] #256,100 sort across the columns
+            cdfs = torch.searchsorted(sample_sorted.contiguous(), 
+                                      y_proj.unsqueeze(-1).contiguous(), side='right') / n_samples #256,1
             pits.append(cdfs)
     elif prerank =='density':
         #samples are of shape 256, 100, 4
@@ -106,6 +110,7 @@ def calculate_PIT(dist, y, n_samples, setup, prerank, tau = 100):
             log_density = dist.log_prob(samples[:, i, :]) #10000,10
             log_densities_samples.append(log_density) #256
         log_densities_samples = torch.stack(log_densities_samples).permute(1,0)
+        # log_densities_samples = dist.log_prob(samples)#256,100
         log_densities_y = dist.log_prob(y) #256
         cdfs =  torch.sigmoid(tau *(log_densities_y.unsqueeze(1) -log_densities_samples)).mean(dim=1, keepdim=True)
         pits.append(cdfs)
@@ -129,23 +134,25 @@ def calculate_PIT(dist, y, n_samples, setup, prerank, tau = 100):
 
 #     return pits
 
-def pce(dist, y, n_samples = 100, prerank = 'pca', setup = 'real'):
+def pce(dist, y, n_samples = 100, prerank = 'pca', setup = 'real', mode = 'train'):
     alphas = torch.linspace(0, 1, 100, device=y.device)
     pit_values, _ = calculate_PIT(dist, y, n_samples = n_samples, setup = setup, prerank = prerank) #shape (4,256,1) or (1, 256,1)
     dim = pit_values.shape[0]
     pces = []
-    # cdfs = []
+    cdfs = []
     for d in range(dim):
         pits = pit_values[d].view(-1)  # shape: (256,)
         pits_sorted = pits.sort()[0]
         cdf_estimates = torch.searchsorted(pits_sorted, alphas, side='right') / pits_sorted.numel()
         pce = torch.mean(torch.abs(cdf_estimates - alphas))
         pces.append(pce)
-        # cdfs.append(cdf_estimates)
+        cdfs.append(cdf_estimates)
     pces = torch.stack(pces)
-    # cdfs = torch.stack(cdfs)
-    if prerank == 'pca':
-        explained_var = torch.from_numpy(_).to(pces.device)
-        return pces, explained_var
-    else: return pces
+    cdfs = torch.stack(cdfs)
+    if mode == 'train':
+        if prerank == 'pca':
+            explained_var = torch.from_numpy(_).to(pces.device)
+            return (pces * explained_var).sum()
+        else: return pces.mean()
+    else: return pces, cdfs, _
     
