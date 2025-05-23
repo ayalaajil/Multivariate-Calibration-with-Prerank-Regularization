@@ -1,7 +1,7 @@
 from moc.configs.config import get_config
 from moc.utils.run_config import RunConfig
 # from moc.models.mqf2.lightning_module import MQF2LightningModule
-from moc.models.mixture.mixture_model import MixtureLightningModule
+from moc.models.mixture.mixture_model2 import MixtureLightningModule
 from moc.models.gaussian.gaussian import GaussianLightningModule
 from moc.models.trainers.lightning_trainer import get_lightning_trainer
 from moc.datamodules.real_datamodule import RealDataModule
