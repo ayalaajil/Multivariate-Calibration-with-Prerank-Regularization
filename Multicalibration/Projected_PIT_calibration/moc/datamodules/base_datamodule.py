@@ -102,6 +102,12 @@ class BaseDataModule(LightningDataModule):
         if self.rc.config.fast:
             max_size = 1000
         x, y = self.subsample(x, y, max_size=max_size)
+        if self.dataset == 'sf2':
+            max_val = y.max()
+            print(max_val)
+            mask1 = torch.all(torch.abs(y) < max_val, dim=1)
+            x = x[mask1]
+            y = y[mask1]
         tensor_data = TensorDataset(x, y)
         self.total_size = len(tensor_data)
 
@@ -125,9 +131,10 @@ class BaseDataModule(LightningDataModule):
             generator=torch.Generator().manual_seed(self.hparams.seed),
         )
 
-        x, y = self.data_train[:] #returns train data
+        x, y = self.data_train[:]
         self.scaler_x = StandardScaler().fit(x)
         self.scaler_y = StandardScaler().fit(y)
+
 
         if self.rc.config.normalize:
             self.data_train = self.make_scaled_dataset(self.data_train)

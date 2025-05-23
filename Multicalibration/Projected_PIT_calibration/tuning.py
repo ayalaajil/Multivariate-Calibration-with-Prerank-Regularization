@@ -13,48 +13,6 @@ import os
 
 os.environ["CUDA_VISIBLE_DEVICES"] = "6"
 
-
-'''class NLLConstraintCallback:
-    def __init__(self):
-        self.nll_min = float('inf')
-        self.nll_max = float('-inf')
-
-    def __call__(self, study, trial):
-        nll = trial.user_attrs.get("nll")
-        if nll is None:
-            return
-
-        # Update min and max
-        self.nll_min = min(self.nll_min, nll)
-        self.nll_max = max(self.nll_max, nll)
-
-        # Compute dynamic threshold
-        if self.nll_max > self.nll_min:
-            threshold = self.nll_min + 0.5 * (self.nll_max - self.nll_min)
-            if nll > threshold:
-                trial.set_user_attr("constraint_violation_nll", True)
-                trial.report(float('inf'), step=0)
-                raise optuna.exceptions.TrialPruned()
-
-class EnergyConstraintCallback:
-    def __init__(self):
-        self.best_energy = float('inf')
-
-    def __call__(self, study, trial):
-        energy = trial.user_attrs.get("energy")
-        if energy is None:
-            return
-
-        if energy < self.best_energy:
-            self.best_energy = energy
-
-        threshold = self.best_energy * 1.1
-        if energy > threshold:
-            trial.set_user_attr("constraint_violation", True)
-            trial.report(float('inf'), step=0)  # mark as unpromising
-            raise optuna.exceptions.TrialPruned()'''
-
-
 def objective(trial, config, data_group, data_name, seed, prerank):
     lambda_reg = trial.suggest_float("lambda_reg", 1e-3, 10.0, log=True)
 
@@ -75,7 +33,9 @@ def objective(trial, config, data_group, data_name, seed, prerank):
     model.to(config.device)
     model.eval()
 
-    pces, nlls, energies = [], [], []
+    pces, nlls = [], []
+    if prerank == 'pca':
+        weights = []
 
     with torch.no_grad():
         for x, y in datamodule.val_dataloader():
@@ -83,51 +43,57 @@ def objective(trial, config, data_group, data_name, seed, prerank):
             y = y.to(config.device)
             dist = model.predict(x)
             # pce_values, w = pce(dist, y, n_samples=100, prerank=prerank, setup='real')
-            pce_values = pce(dist, y, n_samples=100, prerank=prerank, setup='real')
-            nll = -dist.log_prob(y).mean().item()
-            energy = multivariate_energy_score(dist, y)
-            pces.append(pce_values)
-
+            if prerank == 'pca':
+                pce_values, weight = pce(dist, y, n_samples=100, prerank=prerank, setup='real')
+                weights.append(weight)
+            else: pce_values = pce(dist, y, n_samples=100, prerank=prerank, setup='real')
             # NLL
             nll = -dist.log_prob(y).mean().item()
             nlls.append(nll)
-            energies.append(energy)
+            pces.append(pce_values)
 
     pce_total = torch.stack(pces).mean(dim=0)
-    energy_total = torch.stack(energies).mean(dim=0)
-    if prerank == 'marginal':
-        pce_total = pce_total.mean()
-    # weights_total = torch.stack(weights).mean(dim=0)
-    # weighted_sum = torch.sum(pce_total * weights_total).item()
     nll_mean = np.mean(nlls)
-    # crps_mean = np.mean(crps_vals) if len(crps_vals) > 0 else float('inf')
-
+    if prerank =='pca':
+        weights_total = torch.stack(weights).mean(dim=0)
+        pce_total = torch.sum(pce_total * weights_total)
+    elif prerank == 'marginal':
+        pce_total = pce_total.mean()
+    
     # Log metrics to W&B
     wandb.log({
         "lambda_reg": lambda_reg,
         "pce": pce_total.item(),
         "nll": nll_mean,
-        "energy": energy_total.item()
     })
 
 
     # Log both to the trial
     trial.set_user_attr("nll", nll_mean)
-
-    trial.set_user_attr("energy", energy_total.item())
+    # trial.set_user_attr("energy", energy_total.item())
     return pce_total.item()
-
-wandb_run = wandb.init(
-    project="multicalibration-hparam-tuning",
-    name="optuna_tuning_curve",
-    config={"search_space": {"lambda_reg": [1e-4, 10.0]}}
-)
 
 config = get_config()
 config.device = 'cuda'
-data_group, data_name = ['mulan', 'osales']
+dataset_names = [
+                #  ['camehl', 'households'], 
+                #  ['cevid', 'air'], ['cevid', 'births1'],
+                #  ['cevid', 'births2'], ['cevid', 'wage'], ['mulan', 'scm20d'],
+                #  ['mulan', 'rf2'], ['mulan', 'rf1'], ['mulan', 'scm1d'],
+                #  ['mulan', 'atp1d'], ['mulan', 'atp7d'], ['mulan', 'oes97'],
+                #  ['mulan', 'oes10'], ['mulan', 'jura'], ['mulan', 'sf1'],
+                #  ['mulan', 'sf2'], ['mulan', 'wq'], ['mulan', 'enb'],
+                #  ['mulan', 'slump'], 
+                 ['mulan', 'osales'], 
+                #  ['mulan', 'scpf'], 
+                #  ['feldman', 'meps_21'], ['feldman', 'meps_19'], ['feldman', 'meps_20'], 
+                #  ['feldman', 'house'], ['feldman', 'bio'], ['feldman', 'blog_data'], 
+                #  ['del_barrio', 'calcofi'], ['del_barrio', 'ansur2'], ['wang', 'taxi'], 
+                #  ['wang', 'energy'],
+                 ]
+data_group, data_name = ['mulan', 'sf1']
 seed = 42
-prerank = 'marginal'
+prerank = 'pca'
 
 wandb_run = wandb.init(
     project="multicalibration-hparam-tuning",
@@ -137,15 +103,6 @@ wandb_run = wandb.init(
 
 wrapped_objective = partial(objective, config=config, data_group=data_group, 
                             data_name=data_name, seed=seed, prerank=prerank)
-
-# sampler = optuna.samplers.TPESampler(seed=seed)
-'''study = optuna.create_study(direction="minimize", sampler=sampler)
-study.optimize(wrapped_objective, n_trials=40, callbacks=[nll_callback])
-wandb_run.finish()
-
-print("Best lambda_reg:", study.best_params["lambda_reg"])
-print("Best PCE:", study.best_value)
-print("Corresponding Energy:", study.best_trial.user_attrs["energy"])'''
 
 
 study = optuna.create_study(direction="minimize")
@@ -157,8 +114,8 @@ wandb_run.finish()
 all_trials = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
 
 # Find minimal NLL
-min_nll = min(t.user_attrs["nll"] for t in all_trials)
-nll_threshold = min_nll + 0.5 * (max(t.user_attrs["nll"] for t in all_trials) - min_nll)
+max_nll, min_nll = max(t.user_attrs["nll"] for t in all_trials), min(t.user_attrs["nll"] for t in all_trials)
+nll_threshold = min_nll + 0.5 * (max_nll - min_nll)
 
 admissible_trials = [t for t in all_trials if t.user_attrs["nll"] <= nll_threshold]
 
@@ -167,5 +124,5 @@ best_trial = min(admissible_trials, key=lambda t: t.value)
 print("Best lambda_reg (under constraint):", best_trial.params["lambda_reg"])
 print("Best PCE (under constraint):", best_trial.value)
 print("Corresponding NLL:", best_trial.user_attrs["nll"])
-print("Corresponding Energy:", best_trial.user_attrs["energy"])
+# print("Corresponding Energy:", best_trial.user_attrs["energy"])
 

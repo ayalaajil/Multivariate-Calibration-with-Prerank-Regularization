@@ -23,6 +23,7 @@ import wandb
 
 config = get_config()
 config.device = 'cuda'
+torch.manual_seed(42)
 
 seeds = [0, 42, 866, 12, 4]
 # seeds = [42, 866]
@@ -35,55 +36,64 @@ dataset_names = [
                 #  ['mulan', 'oes10'], ['mulan', 'jura'], ['mulan', 'sf1'],
                 #  ['mulan', 'sf2'], ['mulan', 'wq'], ['mulan', 'enb'],
                 #  ['mulan', 'slump'], 
-                 ['mulan', 'osales'], 
+                 ['mulan', 'oes10'], 
                 #  ['mulan', 'scpf'], 
                 #  ['feldman', 'meps_21'], ['feldman', 'meps_19'], ['feldman', 'meps_20'], 
                 #  ['feldman', 'house'], ['feldman', 'bio'], ['feldman', 'blog_data'], 
                 #  ['del_barrio', 'calcofi'], ['del_barrio', 'ansur2'], ['wang', 'taxi'], 
                 #  ['wang', 'energy'],
                  ]
-prerank = 'mean'
-pce_across_datasets = {}
-for dataset in dataset_names:
-    data_group, data_name = dataset
-    pce_over_seeds = []
-    for seed in seeds:
-        print(f"working on dataset {data_group} {data_name} {prerank} seed {seed}")
-        rc = RunConfig(config, data_group, data_name, seed=seed)
-        datamodule = RealDataModule(rc, seed=seed, num_workers = 8)
-        p, q = datamodule.input_dim, datamodule.output_dim
-        # model = GaussianLightningModule(p, q, lambda_reg = 1, reg_type = 'pce-kde', prerank = 'density')
-        model = MixtureLightningModule(p, q, prerank = prerank)
-        #model = MQF2LightningModule(p, q)
-        trainer = get_lightning_trainer(rc)
-        trainer.fit(model, datamodule)
-        # wandb.finish()
-        model.to(config.device)
-        model.eval()
-        pces = []
-        # weights = []
-        with torch.no_grad():
-            for x, y in datamodule.val_dataloader():
-                x = x.to(config.device)
-                y = y.to(config.device)
-                dist = model.predict(x)
-                pce_values = pce(dist, y, n_samples = 100, prerank = prerank, setup='real') #4
-                # cdf = reliability_plots(dist, y, n_samples = 100, prerank = 'marginal', setup = 'real')
-                pces.append(pce_values)
-                # weights.append(w)
-        pce_total = torch.stack(pces).mean(dim=0)
-        # weights_total = torch.stack(weights).mean(dim=0)
-        # weighted_sum = torch.sum(pce_total * weights_total)
-        pce_over_seeds.append(pce_total)
-    pce_over_seeds = torch.stack(pce_over_seeds) #when marginal add .mean(dim=-1)
-    avg_pce = pce_over_seeds.mean()
-    stderr = pce_over_seeds.std() / np.sqrt(len(seeds))
-    print(avg_pce.item(), stderr.item())
-    pce_across_datasets[data_name] = (avg_pce.item(), stderr.item())
+prerank = 'marginal'
+# pce_across_datasets = {}
+data_group, data_name = 'mulan', 'oes10'
+l = 0.0097
+# for dataset in dataset_names:
+#     data_group, data_name = dataset
+pce_over_seeds, cdf_over_seeds = [], []
+for seed in seeds:
+    print(f"working on dataset {data_group} {data_name} {prerank} seed {seed}")
+    rc = RunConfig(config, data_group, data_name, seed=seed)
+    datamodule = RealDataModule(rc, seed=seed, num_workers = 8)
+    p, q = datamodule.input_dim, datamodule.output_dim
+    # model = GaussianLightningModule(p, q, lambda_reg = 1, reg_type = 'pce-kde', prerank = 'density')
+    model = MixtureLightningModule(p, q, lambda_reg = l, reg_type = 'pce-kde', prerank = prerank)
+    #model = MQF2LightningModule(p, q)
+    trainer = get_lightning_trainer(rc)
+    trainer.fit(model, datamodule)
+    # wandb.finish()
+    model.to(config.device)
+    model.eval()
+    pces, cdfs = [], []
+    if prerank == 'pca':
+        weights = []
+    with torch.no_grad():
+        for x, y in datamodule.val_dataloader():
+            x = x.to(config.device)
+            y = y.to(config.device)
+            dist = model.predict(x)
+            pce_values, cdf_values, _ = pce(dist, y, n_samples = 100, prerank = prerank, setup='real', mode = 'test')
+            # cdf = reliability_plots(dist, y, n_samples = 100, prerank = 'marginal', setup = 'real')
+            pces.append(pce_values)
+            cdfs.append(cdf_values)
+            if prerank == 'pca':
+                explained_var = torch.from_numpy(_).to(pce_values.device)
+                weights.append(explained_var)
+    pce_total = torch.stack(pces).mean(dim=0)
+    cdfs_total = torch.stack(cdfs).mean(dim=0)
+    if prerank == 'pca':
+        weights_total = torch.stack(weights).mean(dim=0)
+        pce_total = torch.sum(pce_total * weights_total)
+    elif prerank =='marginal':
+        pce_total = pce_total.mean(dim=0)
+    # explained_var = np.stack(explained_var).mean(axis=0)
+    pce_over_seeds.append(pce_total.cpu().numpy())
+    cdf_over_seeds.append(cdfs_total.cpu().numpy())
+pce_over_seeds = np.stack(pce_over_seeds)
+cdf_over_seed = np.stack(cdf_over_seeds)
 
-filename = f"pkl-files/pce_across_32datasets_mixnll_{prerank}.pkl"
-with open(filename, "wb") as f:
-    pickle.dump(pce_across_datasets, f)
+# filename = f"pkl-files/pce_across_32datasets_mixnll_{prerank}.pkl"
+# with open(filename, "wb") as f:
+#     pickle.dump(pce_across_datasets, f)
 
 # alphas = np.linspace(0, 1, 100)
 # cdfs_total = cdfs_total.cpu().numpy()

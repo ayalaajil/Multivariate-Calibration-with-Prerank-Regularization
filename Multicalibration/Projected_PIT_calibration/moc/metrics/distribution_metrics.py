@@ -94,8 +94,8 @@ def calculate_PIT(dist, y, n_samples, setup, prerank, tau = 100):
         explained_var = pca.explained_variance_ratio_ #array of len 4
         for d in range(dim):
             u = vectors[d]
-            sample_proj = torch.matmul(samples, u) # 256,100,1
-            y_proj = torch.matmul(y, u) #256,1
+            sample_proj = torch.matmul(samples, u) # 256,100
+            y_proj = torch.matmul(y, u) #256
             cdfs =  torch.sigmoid(tau *(y_proj.unsqueeze(-1) - sample_proj)).mean(dim=1, keepdim=True)
             pits.append(cdfs)
     elif prerank =='density':
@@ -147,7 +147,7 @@ def pce(dist, y, n_samples = 100, prerank = 'pca', setup = 'real', mode = 'train
     if mode == 'train':
         if prerank == 'pca':
             explained_var = torch.from_numpy(_).to(pces.device)
-            return (pces * explained_var).sum()
+            return pces, explained_var
         else: return pces.mean()
     else: return pces, cdfs, _
     

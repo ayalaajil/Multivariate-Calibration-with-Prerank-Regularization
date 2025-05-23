@@ -92,4 +92,5 @@ def preprocess(x, y, categorical_mask=None):
     x, y = x.to_numpy('float32'), y.to_numpy('float32')
     assert np.isnan(x).sum() == 0 and np.isnan(y).sum() == 0
     assert np.isinf(x).sum() == 0 and np.isinf(y).sum() == 0
+    assert np.all(np.abs(y) < 1e6), "Outlier present!"
     return x, y, categorical_mask

@@ -4,7 +4,7 @@ import torch
 from lightning.pytorch import LightningModule
 from torch.distributions import MixtureSameFamily, Categorical, MultivariateNormal
 from sklearn.decomposition import PCA
-# import wandb
+import wandb
 import numpy as np
 import sys
 from pathlib import Path
@@ -122,10 +122,10 @@ class MixtureLightningModule(LightningModule):
         self.validation_step_outputs = []
         self.train_step_outputs = []
 
-        self.recent_losses = []
-        self.regularization_active = True #HERE
-        self.stabilization_patience = 5
-        self.stabilization_threshold = 1e-1 
+        # self.recent_losses = []
+        # self.regularization_active = True #HERE
+        # self.stabilization_patience = 5
+        # self.stabilization_threshold = 1e-1 
 
     def forward(self, x):
         out = self.model(x) #(batch_size, 75)
@@ -143,11 +143,11 @@ class MixtureLightningModule(LightningModule):
     def compute_loss(self, dist, y):
 
         reg_val = 0.0  # raw reg
-        if self.regularization_active:
-            if self.hparams.reg_type == 'truncation':
-                reg_val = truncation_regularization(dist, y)
-            elif self.hparams.reg_type == 'pce-kde':
-                reg_val = pce_kde_regularization(dist, y, n_samples = self.hparams.es_num_samples, prerank = self.hparams.prerank)
+        # if self.regularization_active:
+        if self.hparams.reg_type == 'truncation':
+            reg_val = truncation_regularization(dist, y)
+        elif self.hparams.reg_type == 'pce-kde':
+            reg_val = pce_kde_regularization(dist, y, n_samples = self.hparams.es_num_samples, prerank = self.hparams.prerank)
 
         if self.hparams.loss == 'nll':
             loss_term = -dist.log_prob(y).mean()
@@ -209,7 +209,7 @@ class MixtureLightningModule(LightningModule):
     #     #     log_dict[f"train/pce_dim_{i+1}"] = val
 
     #     # Log to W&B
-    #     wandb.log(log_dict)
+    #     # wandb.log(log_dict)
 
     #     # Clear for next epoch
     #     self.train_step_outputs.clear()
@@ -258,21 +258,15 @@ class MixtureLightningModule(LightningModule):
     #     }
 
     #     # Update recent_losses and check for stabilization
-    #     self.recent_losses.append(avg_nll_score) 
+    #     # self.recent_losses.append(avg_nll_score) 
 
-    #     '''if len(self.recent_losses) >= self.stabilization_patience:
-    #         diffs = np.diff(self.recent_losses[-self.stabilization_patience:])
-    #         max_decrease = max(abs(d) for d in diffs)
-    #         if max_decrease < self.stabilization_threshold:
-    #             self.regularization_active = True
-    #             log.info(f"Regularization activated at epoch {self.current_epoch}. Max recent change in loss: {max_decrease}")'''
 
     #     # Add each dimension of the PCE score
     #     # for i, val in enumerate(avg_pce_score):
     #     #     log_dict[f"val/pce_dim_{i+1}"] = val
 
     #     # Log to W&B
-    #     wandb.log(log_dict)
+    #     # wandb.log(log_dict)
 
     #     # Clear for next epoch
     #     self.validation_step_outputs.clear()
