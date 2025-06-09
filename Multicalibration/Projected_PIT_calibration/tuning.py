@@ -91,9 +91,9 @@ dataset_names = [
                 #  ['del_barrio', 'calcofi'], ['del_barrio', 'ansur2'], ['wang', 'taxi'], 
                 #  ['wang', 'energy'],
                  ]
-data_group, data_name = ['mulan', 'sf1']
+data_group, data_name = ['mulan', 'oes10']
 seed = 42
-prerank = 'pca'
+prerank = 'dependency'
 
 wandb_run = wandb.init(
     project="multicalibration-hparam-tuning",
@@ -124,5 +124,4 @@ best_trial = min(admissible_trials, key=lambda t: t.value)
 print("Best lambda_reg (under constraint):", best_trial.params["lambda_reg"])
 print("Best PCE (under constraint):", best_trial.value)
 print("Corresponding NLL:", best_trial.user_attrs["nll"])
-# print("Corresponding Energy:", best_trial.user_attrs["energy"])
 

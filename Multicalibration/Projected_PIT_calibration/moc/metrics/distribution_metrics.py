@@ -113,22 +113,6 @@ def calculate_PIT(dist, y, n_samples, setup, prerank, tau = 100):
         raise ValueError(f"Unknown prerank function: {prerank}")
     return torch.stack(pits), explained_var
 
-# def calculate_PIT_density(dist, y, n_samples=100):
-#     batch_size, dim = y.shape
-#     samples = dist.sample((y.shape[0]*n_samples,)).reshape(y.shape[0], n_samples, -1)
-
-#     samples_flat = samples.reshape(-1, dim)  # (batch_size * n_samples, dim)
-#     log_probs = dist.log_prob(samples_flat)  # (batch_size * n_samples,)
-#     log_probs = log_probs.view(batch_size, n_samples)  # (batch_size, n_samples)
-
-#     log_probs_y = dist.log_prob(y)  # (batch_size,)
-
-#     pits = (log_probs <= log_probs_y.unsqueeze(1)).float().mean(dim=1, keepdim=True)  # (batch_size, 1)
-
-#     pits = pits.unsqueeze(0)  # (1, batch_size, 1)
-
-#     return pits
-
 def pce(dist, y, n_samples = 100, prerank = 'pca', setup = 'real', mode = 'train'):
     alphas = torch.linspace(0, 1, 100, device=y.device)
     pit_values, _ = calculate_PIT(dist, y, n_samples = n_samples, setup = setup, prerank = prerank) #shape (4,256,1) or (1, 256,1)
