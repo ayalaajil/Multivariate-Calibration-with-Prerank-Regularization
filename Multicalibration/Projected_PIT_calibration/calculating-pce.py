@@ -12,14 +12,14 @@ import torch
 import pickle
 import wandb
 
-# plt.style.use('seaborn-v0_8')
-# plt.rcParams.update({
-#     'axes.titlesize': 12,
-#     'axes.labelsize': 12,
-#     'xtick.labelsize': 12,
-#     'ytick.labelsize': 12,
-#     'legend.fontsize': 12
-# })
+plt.style.use('seaborn-v0_8')
+plt.rcParams.update({
+    'axes.titlesize': 12,
+    'axes.labelsize': 12,
+    'xtick.labelsize': 12,
+    'ytick.labelsize': 12,
+    'legend.fontsize': 12
+})
 
 config = get_config()
 config.device = 'cuda'
@@ -78,27 +78,31 @@ for seed in seeds:
             if prerank == 'pca':
                 explained_var = torch.from_numpy(_).to(pce_values.device)
                 weights.append(explained_var)
-    pce_total = torch.stack(pces).mean(dim=0)
-    cdfs_total = torch.stack(cdfs).mean(dim=0)
+    pce_total = torch.stack(pces).mean(dim=0) # D
+    cdfs_total = torch.stack(cdfs).mean(dim=0) # (D,100)
     if prerank == 'pca':
         weights_total = torch.stack(weights).mean(dim=0)
         pce_total = torch.sum(pce_total * weights_total)
     elif prerank =='marginal':
         pce_total = pce_total.mean(dim=0)
+        cdfs_total = cdfs_total.mean(dim=0)
     # explained_var = np.stack(explained_var).mean(axis=0)
     pce_over_seeds.append(pce_total.cpu().numpy())
     cdf_over_seeds.append(cdfs_total.cpu().numpy())
 pce_over_seeds = np.stack(pce_over_seeds)
 cdf_over_seed = np.stack(cdf_over_seeds)
 
-# filename = f"pkl-files/pce_across_32datasets_mixnll_{prerank}.pkl"
-# with open(filename, "wb") as f:
-#     pickle.dump(pce_across_datasets, f)
+print(pce_over_seeds)
+print(f"shape of cdf_over_seeds: {cdf_over_seeds.shape}")
+# To do:
+# 1. Plot the cdfs
+# 2. Print the mean of the pces and standard errors
 
-# alphas = np.linspace(0, 1, 100)
-# cdfs_total = cdfs_total.cpu().numpy()
-# pce_total = pce_total.cpu().numpy()
-# sorted_indices = np.argsort(pce_total)
+print(f"Mean PCE over seeds: {pce_over_seeds.mean()}")
+print(f"Standard error of PCE over seeds: {pce_over_seeds.std() / np.sqrt(len(seeds))}")
+
+alphas = np.linspace(0, 1, 100)
+cdfs_total = cdfs_total.cpu().numpy()
 
 # colors = [
 #     'royalblue',
@@ -110,17 +114,16 @@ cdf_over_seed = np.stack(cdf_over_seeds)
 #     'deepskyblue',
 #     'saddlebrown'
 # ]
-# plt.figure(figsize=(6, 4))
-# for d in sorted_indices:
-#     plt.plot(alphas, cdfs_total[d], color = colors[d], 
-#              label=f"d = {d+1}", 
-#              lw = 1.5, alpha = 0.8)
-# plt.plot(alphas, alphas, linestyle='--', color='black')
-# plt.xlabel(r"$\alpha$")
-# plt.ylabel(r"$\hat{F}_Z(\alpha)$")
+plt.figure(figsize=(6, 4))
+for s in range(len(seeds)):
+    plt.plot(alphas, cdfs_total[s], color = 'darkorange', 
+             lw = 1.5, alpha = 0.8)
+plt.plot(alphas, alphas, linestyle='--', color='royalblue')
+plt.xlabel(r"$\alpha$")
+plt.ylabel(r"$\hat{F}_Z(\alpha)$")
 # plt.legend(loc='upper left')
 # plt.title(f"{prerank} pre-rank, PCE = {pce_total.mean():.4f}")
-# plt.grid(True)
-# plt.tight_layout()
-# plt.savefig(f"figures/after-reg/reliability_plot_{prerank}_bio_mixnll.png", dpi=300)
-# plt.show()
+plt.grid(True)
+plt.tight_layout()
+plt.savefig(f"figures/after-reg/rel_plot_{prerank}_{data_name}_mixnll.png", dpi=300)
+plt.show()
