@@ -43,10 +43,10 @@ dataset_names = [
                 #  ['del_barrio', 'calcofi'], ['del_barrio', 'ansur2'], ['wang', 'taxi'], 
                 #  ['wang', 'energy'],
                  ]
-prerank = 'pca'
+prerank = 'dependency'
 # pce_across_datasets = {}
-data_group, data_name = 'mulan', 'oes10'
-l = 0.0033
+data_group, data_name = 'mulan', 'sf2'
+l = 0.0111
 # for dataset in dataset_names:
 #     data_group, data_name = dataset
 pce_over_seeds, cdf_over_seeds = [], []
@@ -114,7 +114,7 @@ alphas = np.linspace(0, 1, 100)
 # ]
 plt.figure(figsize=(6, 4))
 for s in range(len(seeds)):
-    plt.plot(alphas, cdf_over_seeds[s], color = 'royalblue', 
+    plt.plot(alphas, cdf_over_seeds[s][0], color = 'royalblue', 
              lw = 1.5, alpha = 0.8)
 plt.plot(alphas, alphas, linestyle='--', color='black')
 plt.xlabel(r"$\alpha$")
