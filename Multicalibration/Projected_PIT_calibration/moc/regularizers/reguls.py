@@ -100,7 +100,6 @@ def pce_kde_regularization(dist, y, prerank, n_samples = 100, M = 100, tau = 100
         pit_d = pit_values[d]  # (256, 1)
         pit_exp = pit_d.expand(-1, M)  # (256, 100)
         alphas_exp = alphas.view(1, M)  # (1, 100)
-
         # Compute phi_kde for all alphas at once
         phi_kde = torch.sigmoid(tau * (alphas_exp - pit_exp)).mean(dim=0)  # (100,)
         pce_kde =  torch.abs(alphas - phi_kde).pow(p).mean()

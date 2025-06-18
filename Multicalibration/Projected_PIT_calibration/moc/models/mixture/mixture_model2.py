@@ -101,7 +101,7 @@ class MixtureLightningModule(LightningModule):
     ):
         super().__init__()
         self.save_hyperparameters()
-        # wandb.init(project="multicalibration")
+        # wandb.init(project="multicalibration", entity = 'ryuzaki')
 
         output_dim = output_dim
         mixture_size = self.hparams.mixture_size
@@ -155,68 +155,69 @@ class MixtureLightningModule(LightningModule):
             loss_term = multivariate_energy_score(dist, y, n_samples=self.hparams.es_num_samples).mean()
         else:
             raise ValueError(f'Invalid loss: {self.hparams.loss}')
-
+        print(f"Checking {reg_val.requires_grad}, {reg_val.grad_fn}")
         # pce_score = pce(dist, y, n_samples = self.hparams.es_num_samples, prerank = self.hparams.prerank) #return a list of d elements
-        pce_score = 0.0
-        total_loss = loss_term + (self.hparams.lambda_reg * reg_val)
+        # total_loss = loss_term + (self.hparams.lambda_reg * reg_val)
+        total_loss = reg_val
 
-        return total_loss, loss_term, reg_val, pce_score
+        return total_loss, loss_term, reg_val
 
 
     def step(self, batch):
         x, y = batch
         dist = self(x) #256 distributions in 4D
-        total_loss, loss_term, raw_reg, pce_score = self.compute_loss(dist, y)
-        return total_loss, loss_term, raw_reg, pce_score
+        # print(dist.mean.requires_grad) #printed True
+        total_loss, loss_term, raw_reg = self.compute_loss(dist, y)
+        return total_loss, loss_term, raw_reg
 
     def training_step(self, batch, batch_idx):
-        total_loss, loss_term, raw_reg, pce_score = self.step(batch)
-        # self.train_step_outputs.append({
-        #     "total_loss": total_loss.detach().cpu().numpy(), #float
-        #     "raw_reg": raw_reg, #float
-        #     "nll": loss_term.detach().cpu().numpy(), #a list
-        #     "pce_score": pce_score.detach().cpu().numpy(), #a list
-        # })
+        total_loss, loss_term, raw_reg = self.step(batch)
+        self.train_step_outputs.append({
+            "total_loss": total_loss.detach().cpu().numpy(), #float
+            "raw_reg": raw_reg, #float
+            "nll": loss_term.detach().cpu().numpy(), #a list
+            # "pce_score": pce_score.detach().cpu().numpy(), #a list
+        })
         return total_loss
     
-    # def on_train_epoch_end(self):
-    #     total_losses = []
-    #     raw_regs = []
-    #     nlls = []
-    #     pce_scores = []
+    def on_train_epoch_end(self):
+        total_losses = []
+        raw_regs = []
+        nlls = []
+        # pce_scores = []
 
-    #     for out in self.train_step_outputs:
-    #         total_losses.append(float(out["total_loss"]))
-    #         raw_regs.append(float(out["raw_reg"]))
-    #         nlls.append(np.array(out["nll"]))  # shape: (d,)
-    #         pce_scores.append(np.array(out["pce_score"]))  # shape: (d,)
+        for out in self.train_step_outputs:
+            total_losses.append(float(out["total_loss"]))
+            raw_regs.append(float(out["raw_reg"]))
+            nlls.append(np.array(out["nll"]))  # shape: (d,)
+            # pce_scores.append(np.array(out["pce_score"]))  # shape: (d,)
 
-    #     avg_total_loss = np.mean(total_losses)
-    #     avg_raw_reg = np.mean(raw_regs)
-    #     avg_nll = np.mean(nlls)
-    #     avg_pce = np.mean(pce_scores)  # shape: (d,)
+        avg_total_loss = np.mean(total_losses)
+        avg_raw_reg = np.mean(raw_regs)
+        avg_nll = np.mean(nlls)
+        # avg_pce = np.mean(pce_scores)  # shape: (d,)
 
-    #     # Build log dictionary
-    #     log_dict = {
-    #         "train/total_loss": avg_total_loss,
-    #         "train/raw_reg": avg_raw_reg,
-    #         "train/nll": avg_nll,
-    #         "train/pce": avg_pce,
-    #     }
+        # Build log dictionary
+        log_dict = {
+            "train/total_loss": avg_total_loss,
+            "train/raw_reg": avg_raw_reg,
+            "train/nll": avg_nll,
+            # "train/pce": avg_pce,
+        }
 
-    #     # Add each dimension of the PCE score
-    #     # for i, val in enumerate(avg_pce_score):
-    #     #     log_dict[f"train/pce_dim_{i+1}"] = val
+        # Add each dimension of the PCE score
+        # for i, val in enumerate(avg_pce_score):
+        #     log_dict[f"train/pce_dim_{i+1}"] = val
 
-    #     # Log to W&B
-    #     # wandb.log(log_dict)
+        # Log to W&B
+        # wandb.log(log_dict)
 
-    #     # Clear for next epoch
-    #     self.train_step_outputs.clear()
+        # Clear for next epoch
+        self.train_step_outputs.clear()
         
 
     def validation_step(self, batch, batch_idx):
-        total_loss, loss_term, raw_reg, pce_score = self.step(batch)
+        total_loss, loss_term, raw_reg = self.step(batch)
         self.log(
             f'val/loss',
             float(total_loss),
@@ -224,52 +225,52 @@ class MixtureLightningModule(LightningModule):
             on_epoch=True,
             prog_bar=True,
         )
-        # self.validation_step_outputs.append({
-        #     "total_loss": total_loss.detach().cpu().numpy(), #float
-        #     "raw_reg": raw_reg,
-        #     "nll": loss_term.detach().cpu().numpy(),
-        #     "pce_score": pce_score.detach().cpu().numpy(),
-        # })
+        self.validation_step_outputs.append({
+            "total_loss": total_loss.detach().cpu().numpy(), #float
+            "raw_reg": raw_reg,
+            "nll": loss_term.detach().cpu().numpy(),
+            # "pce_score": pce_score.detach().cpu().numpy(),
+        })
         return total_loss
     
-    # def on_validation_epoch_end(self):
-    #     total_losses = []
-    #     raw_regs = []
-    #     nlls = []
-    #     pce_scores = []
+    def on_validation_epoch_end(self):
+        total_losses = []
+        raw_regs = []
+        nlls = []
+        # pce_scores = []
 
-    #     for out in self.validation_step_outputs:
-    #         total_losses.append(float(out["total_loss"]))
-    #         raw_regs.append(float(out["raw_reg"]))
-    #         nlls.append(np.array(out["nll"]))
-    #         pce_scores.append(np.array(out["pce_score"]))  # shape: (d,)
+        for out in self.validation_step_outputs:
+            total_losses.append(float(out["total_loss"]))
+            raw_regs.append(float(out["raw_reg"]))
+            nlls.append(np.array(out["nll"]))
+            # pce_scores.append(np.array(out["pce_score"]))  # shape: (d,)
 
-    #     avg_total_loss = np.mean(total_losses)
-    #     avg_raw_reg = np.mean(raw_regs)
-    #     avg_nll_score = np.mean(nlls)
-    #     avg_pce = np.mean(pce_scores)
+        avg_total_loss = np.mean(total_losses)
+        avg_raw_reg = np.mean(raw_regs)
+        avg_nll_score = np.mean(nlls)
+        # avg_pce = np.mean(pce_scores)
 
-    #     # Build log dictionary
-    #     log_dict = {
-    #         "val/total_loss": avg_total_loss,
-    #         "val/raw_reg": avg_raw_reg,
-    #         "val/nll": avg_nll_score,
-    #         "val/pce": avg_pce,
-    #     }
+        # Build log dictionary
+        log_dict = {
+            "val/total_loss": avg_total_loss,
+            "val/raw_reg": avg_raw_reg,
+            "val/nll": avg_nll_score,
+            # "val/pce": avg_pce,
+        }
 
-    #     # Update recent_losses and check for stabilization
-    #     # self.recent_losses.append(avg_nll_score) 
+        # Update recent_losses and check for stabilization
+        # self.recent_losses.append(avg_nll_score) 
 
 
-    #     # Add each dimension of the PCE score
-    #     # for i, val in enumerate(avg_pce_score):
-    #     #     log_dict[f"val/pce_dim_{i+1}"] = val
+        # Add each dimension of the PCE score
+        # for i, val in enumerate(avg_pce_score):
+        #     log_dict[f"val/pce_dim_{i+1}"] = val
 
-    #     # Log to W&B
-    #     # wandb.log(log_dict)
+        # Log to W&B
+        # wandb.log(log_dict)
 
-    #     # Clear for next epoch
-    #     self.validation_step_outputs.clear()
+        # Clear for next epoch
+        self.validation_step_outputs.clear()
 
     def configure_optimizers(self):
         return torch.optim.Adam(params=self.parameters(), lr=self.hparams.lr)

@@ -6,6 +6,8 @@ from lightning.pytorch import LightningModule
 from torch.distributions import MultivariateNormal
 from moc.metrics.distribution_metrics import multivariate_energy_score, pce
 from pathlib import Path
+import wandb
+import numpy as np
 
 reg_path = Path(__file__).resolve().parents[2]
 sys.path.append(str(reg_path))
@@ -87,6 +89,7 @@ class GaussianLightningModule(LightningModule):
     ):
         super().__init__()
         self.save_hyperparameters()
+        wandb.init(project="multicalibration", entity = 'ryuzaki')
 
         output_dim = output_dim
         # Output parameters: loc (output_dim) and scale_tril (output_dim * (output_dim + 1) // 2)
@@ -100,6 +103,8 @@ class GaussianLightningModule(LightningModule):
             hidden_size=self.hparams.hidden_size,
             num_layers=self.hparams.num_layers,
         )
+        self.validation_step_outputs = []
+        self.train_step_outputs = []
 
     def forward(self, x):
         out = self.model(x)
@@ -127,27 +132,49 @@ class GaussianLightningModule(LightningModule):
             loss_term = multivariate_energy_score(dist, y, n_samples=self.hparams.es_num_samples).mean()
         else:
             raise ValueError(f'Invalid loss: {self.hparams.loss}')
-
+        # print(f"Checking {reg_val.requires_grad}, {reg_val.grad_fn}")
         # pce_score = pce(dist, y) #return a list of d elements
 
-        reg_term = self.hparams.lambda_reg * reg_val
-        total_loss = loss_term + reg_term
+        # reg_term = self.hparams.lambda_reg * reg_val
+        # total_loss = loss_term + reg_term
+        total_loss = reg_val
 
-        return total_loss, reg_val
+        return total_loss
     
 
     def step(self, batch):
         x, y = batch
         dist = self(x)
-        total_loss, raw_reg = self.compute_loss(dist, y)
-        return total_loss, raw_reg
-
-    def training_step(self, batch, batch_idx):
-        total_loss, raw_reg = self.step(batch)
+        total_loss = self.compute_loss(dist, y)
         return total_loss
 
+    def training_step(self, batch, batch_idx):
+        total_loss = self.step(batch)
+        self.train_step_outputs.append({
+            "total_loss": total_loss.detach().cpu().numpy(), #float
+        })
+        return total_loss
+
+    def on_train_epoch_end(self):
+        total_losses = []
+
+        for out in self.train_step_outputs:
+            total_losses.append(float(out["total_loss"]))
+
+        avg_total_loss = np.mean(total_losses)
+
+        # Build log dictionary
+        log_dict = {
+            "train/total_loss": avg_total_loss,
+        }
+        # Log to W&B
+        wandb.log(log_dict)
+
+        # Clear for next epoch
+        self.train_step_outputs.clear()
+
     def validation_step(self, batch, batch_idx):
-        total_loss, raw_reg = self.step(batch)
+        total_loss = self.step(batch)
         self.log(
             f'val/loss',
             total_loss,
@@ -155,7 +182,28 @@ class GaussianLightningModule(LightningModule):
             on_epoch=True,
             prog_bar=True,
         )
+        self.validation_step_outputs.append({
+            "total_loss": total_loss.detach().cpu().numpy(), #float
+        })
         return total_loss
+    def on_validation_epoch_end(self):
+        total_losses = []
+
+        for out in self.validation_step_outputs:
+            total_losses.append(float(out["total_loss"]))
+
+        avg_total_loss = np.mean(total_losses)
+
+        # Build log dictionary
+        log_dict = {
+            "val/total_loss": avg_total_loss,
+        }
+
+        # Log to W&B
+        wandb.log(log_dict)
+
+        # Clear for next epoch
+        self.validation_step_outputs.clear()
 
     def configure_optimizers(self):
         return torch.optim.Adam(params=self.parameters(), lr=self.hparams.lr)

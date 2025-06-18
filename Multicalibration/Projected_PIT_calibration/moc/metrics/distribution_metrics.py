@@ -73,7 +73,7 @@ def calculate_PIT(dist, y, n_samples, setup, prerank, tau = 100):
     if setup == 'simulated':
         samples = dist.sample((batch_size*n_samples,)).reshape(batch_size, n_samples, dim) #10000, 1000, 10
     else: 
-        samples = dist.sample((n_samples,)).permute(1, 0, 2) #256,20,4
+        samples = dist.rsample((n_samples,)).permute(1, 0, 2) #256,20,4
     pits = []
     explained_var = np.ones(dim) * (1/dim)
     if prerank in ['mean', 'variance', 'dependency']:
