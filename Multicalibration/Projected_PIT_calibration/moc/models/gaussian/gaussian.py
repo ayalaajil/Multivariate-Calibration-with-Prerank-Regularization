@@ -119,8 +119,7 @@ class GaussianLightningModule(LightningModule):
         return self(x)
 
     def compute_loss(self, dist, y):
-        reg_val = 0.0  # raw reg
-        reg_term = 0.0  # scaled reg
+        reg_val = torch.zeros(1).to(y.device)  # raw reg
         if self.hparams.reg_type == 'truncation':
             reg_val = truncation_regularization(dist, y)
         elif self.hparams.reg_type == 'pce-kde':
@@ -135,37 +134,46 @@ class GaussianLightningModule(LightningModule):
         # print(f"Checking {reg_val.requires_grad}, {reg_val.grad_fn}")
         # pce_score = pce(dist, y) #return a list of d elements
 
-        # reg_term = self.hparams.lambda_reg * reg_val
-        # total_loss = loss_term + reg_term
-        total_loss = reg_val
+        reg_term = self.hparams.lambda_reg * reg_val
+        total_loss = loss_term + reg_term
 
-        return total_loss
+        return total_loss, loss_term, reg_val
     
 
     def step(self, batch):
         x, y = batch
         dist = self(x)
-        total_loss = self.compute_loss(dist, y)
-        return total_loss
+        total_loss, loss_term, raw_reg = self.compute_loss(dist, y)
+        return total_loss, loss_term, raw_reg
 
     def training_step(self, batch, batch_idx):
-        total_loss = self.step(batch)
+        total_loss, loss_term, raw_reg = self.step(batch)
         self.train_step_outputs.append({
             "total_loss": total_loss.detach().cpu().numpy(), #float
+            "loss_term": loss_term.detach().cpu().numpy(), #float
+            "raw_reg": raw_reg.detach().cpu().numpy(), #float
         })
         return total_loss
 
     def on_train_epoch_end(self):
         total_losses = []
+        loss_terms = []
+        raw_regs = []
 
         for out in self.train_step_outputs:
             total_losses.append(float(out["total_loss"]))
+            raw_regs.append(float(out["raw_reg"]))
+            loss_terms.append(float(out["loss_term"]))
 
         avg_total_loss = np.mean(total_losses)
+        avg_loss_term = np.mean(loss_terms)
+        avg_raw_reg = np.mean(raw_regs)
 
         # Build log dictionary
         log_dict = {
             "train/total_loss": avg_total_loss,
+            "train/loss_term": avg_loss_term,
+            "train/raw_reg": avg_raw_reg,   
         }
         # Log to W&B
         wandb.log(log_dict)
@@ -174,7 +182,7 @@ class GaussianLightningModule(LightningModule):
         self.train_step_outputs.clear()
 
     def validation_step(self, batch, batch_idx):
-        total_loss = self.step(batch)
+        total_loss, loss_term, raw_reg = self.step(batch)
         self.log(
             f'val/loss',
             total_loss,
@@ -184,19 +192,30 @@ class GaussianLightningModule(LightningModule):
         )
         self.validation_step_outputs.append({
             "total_loss": total_loss.detach().cpu().numpy(), #float
+            "loss_term": loss_term.detach().cpu().numpy(), #float
+            "raw_reg": raw_reg.detach().cpu().numpy(), #float
         })
         return total_loss
+    
     def on_validation_epoch_end(self):
         total_losses = []
+        loss_terms = []
+        raw_regs = []
 
         for out in self.validation_step_outputs:
             total_losses.append(float(out["total_loss"]))
+            loss_terms.append(float(out["loss_term"]))
+            raw_regs.append(float(out["raw_reg"]))
 
         avg_total_loss = np.mean(total_losses)
+        avg_loss_term = np.mean(loss_terms)
+        avg_raw_reg = np.mean(raw_regs)
 
         # Build log dictionary
         log_dict = {
             "val/total_loss": avg_total_loss,
+            "val/loss_term": avg_loss_term,
+            "val/raw_reg": avg_raw_reg,
         }
 
         # Log to W&B
