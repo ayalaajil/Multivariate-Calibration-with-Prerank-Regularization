@@ -91,7 +91,7 @@ def truncation_regularization(dist, y, num_samples = 1000, M = 100):
     return trunc_total / dim
 
 def pce_kde_regularization(dist, y, prerank, n_samples = 100, M = 100, tau = 100, p = 1):
-    pit_values, _ = calculate_PIT(dist, y, n_samples = n_samples, setup = 'real', prerank = prerank)  # (4, 256, 1)
+    pit_values, _ = calculate_PIT(dist, y, n_samples = n_samples, prerank = prerank)  # (4, 256, 1)
     alphas = torch.linspace(0, 1, M, device=pit_values.device)  # (100,)
     dim = pit_values.shape[0]
     pce_kdes = []

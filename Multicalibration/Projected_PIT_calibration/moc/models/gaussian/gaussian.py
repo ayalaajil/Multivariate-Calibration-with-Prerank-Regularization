@@ -89,7 +89,7 @@ class GaussianLightningModule(LightningModule):
     ):
         super().__init__()
         self.save_hyperparameters()
-        wandb.init(project="multicalibration", entity = 'ryuzaki')
+        # wandb.init(project="multicalibration", entity = 'ryuzaki')
 
         output_dim = output_dim
         # Output parameters: loc (output_dim) and scale_tril (output_dim * (output_dim + 1) // 2)
@@ -131,7 +131,7 @@ class GaussianLightningModule(LightningModule):
             loss_term = multivariate_energy_score(dist, y, n_samples=self.hparams.es_num_samples).mean()
         else:
             raise ValueError(f'Invalid loss: {self.hparams.loss}')
-        # print(f"Checking {reg_val.requires_grad}, {reg_val.grad_fn}")
+        print(f"Checking {reg_val.requires_grad}, {reg_val.grad_fn}")
         # pce_score = pce(dist, y) #return a list of d elements
 
         reg_term = self.hparams.lambda_reg * reg_val
@@ -176,7 +176,7 @@ class GaussianLightningModule(LightningModule):
             "train/raw_reg": avg_raw_reg,   
         }
         # Log to W&B
-        wandb.log(log_dict)
+        # wandb.log(log_dict)
 
         # Clear for next epoch
         self.train_step_outputs.clear()
@@ -219,7 +219,7 @@ class GaussianLightningModule(LightningModule):
         }
 
         # Log to W&B
-        wandb.log(log_dict)
+        # wandb.log(log_dict)
 
         # Clear for next epoch
         self.validation_step_outputs.clear()

@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 import numpy as np
 from sklearn.decomposition import PCA
 from .preranks import get_prerank
@@ -9,50 +10,27 @@ def nll(model, x, y):
     return -dist.log_prob(y).detach()
 
 
-def kernel_score_from_samples(y, s1, s2, kernel):
+def sample(dist, n_samples):
+    r"""
+        B - batch size,
+        K - the number of Gaussian mixture components,
+        D - the dimensionality of each Gaussian component (for example 4D or 16D)
+        n_samples - number of samples to draw
     """
-    Returns the kernel score evaluated in `y` using the samples `s1` and `s2`.
-    `s1` and `s2` are tensors of shape (n_samples, b, d).
-    `y` is a tensor of shape (..., b, d), where the first dimensions are arbitrary 
-    and will be evaluated for the same batch element.
-    `kernel` is a callable that takes two broadcastable tensors of shape (..., d) and returns a tensor of shape (...,).
-    """
-
-    n_samples, b, d = s1.shape
-    assert s1.shape == s2.shape
-    assert y.shape[-2:] == (b, d)
-
-    first_term = kernel(
-        s1.unsqueeze(-3),
-        s2.unsqueeze(-4),
-    ).mean(dim=(-3, -2)) #has shape (256,)
-
-    second_term = kernel(
-        s1,
-        y.unsqueeze(-3),
-    ).mean(dim=-2) #has shape (256,)
-
-    return 0.5 * first_term - second_term #has shape (256,)
-
-
-def energy_score_from_samples(y, s1, s2, beta):
-    def kernel(y1, y2):
-        return torch.linalg.vector_norm(y1 - y2, dim=-1) ** beta
-    return kernel_score_from_samples(y, s1, s2, kernel)
-
-
-
-def sample(dist, n_samples, rsample):
-    if rsample:
-        return dist.rsample(n_samples)
+    if dist.has_rsample: 
+        samples = dist.rsample((n_samples,)).permute(1, 0, 2) # [B,n_samples,D] very important to use rsample() here
     else:
-        return dist.sample(n_samples)
+        logits = dist.mixture_distribution.logits  # [B, K]
+        weights = F.gumbel_softmax(logits.unsqueeze(1).expand(-1, n_samples, -1), tau=1.0, hard=False, dim=-1) #[B, n_samples, K]
+        means = dist.component_distribution.loc  # [B, K, D]
+        scales = dist.component_distribution.scale_tril  # [B, K, D, D]
 
+        B, K, D = means.shape
+        eps = torch.randn(B, n_samples, K, D, device=means.device)
+        component_samples = torch.matmul(scales.unsqueeze(1), eps.unsqueeze(-1)).squeeze(-1) + means.unsqueeze(1)  # [B, n_samples, K, D]
 
-def energy_score(dist, y, n_samples=100, beta=2., rsample=False):
-    s1 = sample(dist, (n_samples,), rsample)
-    s2 = sample(dist, (n_samples,), rsample)
-    return energy_score_from_samples(y, s1, s2, beta)
+        samples = (weights.unsqueeze(-1) * component_samples).sum(dim=2)  # [B, n_samples, D]
+    return samples
 
 def multivariate_energy_score(dist, y, n_samples = 100):
 
@@ -68,12 +46,9 @@ def multivariate_energy_score(dist, y, n_samples = 100):
 
     return (term1 - term2).mean()
 
-def calculate_PIT(dist, y, n_samples, setup, prerank, tau = 100):
+def calculate_PIT(dist, y, n_samples, prerank, tau = 100):
     batch_size, dim = y.shape
-    if setup == 'simulated':
-        samples = dist.sample((batch_size*n_samples,)).reshape(batch_size, n_samples, dim) #10000, 1000, 10
-    else: 
-        samples = dist.rsample((n_samples,)).permute(1, 0, 2) #256,20,4
+    samples = sample(dist, n_samples)
     pits = []
     explained_var = np.ones(dim) * (1/dim)
     if prerank in ['mean', 'variance', 'dependency']:
@@ -105,7 +80,6 @@ def calculate_PIT(dist, y, n_samples, setup, prerank, tau = 100):
             log_density = dist.log_prob(samples[:, i, :]) #10000,10
             log_densities_samples.append(log_density) #256
         log_densities_samples = torch.stack(log_densities_samples).permute(1,0)
-        # log_densities_samples = dist.log_prob(samples)#256,100
         log_densities_y = dist.log_prob(y) #256
         cdfs =  torch.sigmoid(tau *(log_densities_y.unsqueeze(-1) -log_densities_samples)).mean(dim=1, keepdim=True)
         pits.append(cdfs)
@@ -113,9 +87,9 @@ def calculate_PIT(dist, y, n_samples, setup, prerank, tau = 100):
         raise ValueError(f"Unknown prerank function: {prerank}")
     return torch.stack(pits), explained_var
 
-def pce(dist, y, n_samples = 100, prerank = 'pca', setup = 'real', mode = 'train'):
+def pce(dist, y, n_samples = 100, prerank = 'pca', mode = 'train'):
     alphas = torch.linspace(0, 1, 100, device=y.device)
-    pit_values, _ = calculate_PIT(dist, y, n_samples = n_samples, setup = setup, prerank = prerank) #shape (4,256,1) or (1, 256,1)
+    pit_values, _ = calculate_PIT(dist, y, n_samples = n_samples, prerank = prerank) #shape (4,256,1) or (1, 256,1)
     dim = pit_values.shape[0]
     pces = []
     cdfs = []

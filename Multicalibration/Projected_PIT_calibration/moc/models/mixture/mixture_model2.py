@@ -101,7 +101,7 @@ class MixtureLightningModule(LightningModule):
     ):
         super().__init__()
         self.save_hyperparameters()
-        # wandb.init(project="multicalibration", entity = 'ryuzaki')
+        wandb.init(project="multicalibration", entity = 'ryuzaki')
 
         output_dim = output_dim
         mixture_size = self.hparams.mixture_size
@@ -142,7 +142,7 @@ class MixtureLightningModule(LightningModule):
 
     def compute_loss(self, dist, y):
 
-        reg_val = 0.0  # raw reg
+        reg_val = torch.zeros(1).to(y.device)
         # if self.regularization_active:
         if self.hparams.reg_type == 'truncation':
             reg_val = truncation_regularization(dist, y)
@@ -155,10 +155,9 @@ class MixtureLightningModule(LightningModule):
             loss_term = multivariate_energy_score(dist, y, n_samples=self.hparams.es_num_samples).mean()
         else:
             raise ValueError(f'Invalid loss: {self.hparams.loss}')
-        print(f"Checking {reg_val.requires_grad}, {reg_val.grad_fn}")
         # pce_score = pce(dist, y, n_samples = self.hparams.es_num_samples, prerank = self.hparams.prerank) #return a list of d elements
-        # total_loss = loss_term + (self.hparams.lambda_reg * reg_val)
-        total_loss = reg_val
+        reg_term = self.hparams.lambda_reg * reg_val
+        total_loss = loss_term + reg_term
 
         return total_loss, loss_term, reg_val
 
@@ -172,45 +171,37 @@ class MixtureLightningModule(LightningModule):
 
     def training_step(self, batch, batch_idx):
         total_loss, loss_term, raw_reg = self.step(batch)
+        if self.global_step == 0:
+            print(f"Checking {raw_reg.requires_grad}, {raw_reg.grad_fn}")
         self.train_step_outputs.append({
             "total_loss": total_loss.detach().cpu().numpy(), #float
-            "raw_reg": raw_reg, #float
-            "nll": loss_term.detach().cpu().numpy(), #a list
-            # "pce_score": pce_score.detach().cpu().numpy(), #a list
+            "loss_term": loss_term.detach().cpu().numpy(), #float
+            "raw_reg": raw_reg.detach().cpu().numpy(), #float
         })
         return total_loss
     
     def on_train_epoch_end(self):
         total_losses = []
+        loss_terms = []
         raw_regs = []
-        nlls = []
-        # pce_scores = []
 
         for out in self.train_step_outputs:
             total_losses.append(float(out["total_loss"]))
             raw_regs.append(float(out["raw_reg"]))
-            nlls.append(np.array(out["nll"]))  # shape: (d,)
-            # pce_scores.append(np.array(out["pce_score"]))  # shape: (d,)
+            loss_terms.append(float(out["loss_term"]))
 
         avg_total_loss = np.mean(total_losses)
+        avg_loss_term = np.mean(loss_terms)
         avg_raw_reg = np.mean(raw_regs)
-        avg_nll = np.mean(nlls)
-        # avg_pce = np.mean(pce_scores)  # shape: (d,)
 
         # Build log dictionary
         log_dict = {
             "train/total_loss": avg_total_loss,
-            "train/raw_reg": avg_raw_reg,
-            "train/nll": avg_nll,
-            # "train/pce": avg_pce,
+            "train/loss_term": avg_loss_term,
+            "train/raw_reg": avg_raw_reg,   
         }
-
-        # Add each dimension of the PCE score
-        # for i, val in enumerate(avg_pce_score):
-        #     log_dict[f"train/pce_dim_{i+1}"] = val
-
         # Log to W&B
-        # wandb.log(log_dict)
+        wandb.log(log_dict)
 
         # Clear for next epoch
         self.train_step_outputs.clear()
@@ -220,54 +211,41 @@ class MixtureLightningModule(LightningModule):
         total_loss, loss_term, raw_reg = self.step(batch)
         self.log(
             f'val/loss',
-            float(total_loss),
+            total_loss,
             on_step=False,
             on_epoch=True,
             prog_bar=True,
         )
         self.validation_step_outputs.append({
             "total_loss": total_loss.detach().cpu().numpy(), #float
-            "raw_reg": raw_reg,
-            "nll": loss_term.detach().cpu().numpy(),
-            # "pce_score": pce_score.detach().cpu().numpy(),
+            "loss_term": loss_term.detach().cpu().numpy(), #float
+            "raw_reg": raw_reg.detach().cpu().numpy(), #float
         })
         return total_loss
     
     def on_validation_epoch_end(self):
         total_losses = []
+        loss_terms = []
         raw_regs = []
-        nlls = []
-        # pce_scores = []
 
         for out in self.validation_step_outputs:
             total_losses.append(float(out["total_loss"]))
+            loss_terms.append(float(out["loss_term"]))
             raw_regs.append(float(out["raw_reg"]))
-            nlls.append(np.array(out["nll"]))
-            # pce_scores.append(np.array(out["pce_score"]))  # shape: (d,)
 
         avg_total_loss = np.mean(total_losses)
+        avg_loss_term = np.mean(loss_terms)
         avg_raw_reg = np.mean(raw_regs)
-        avg_nll_score = np.mean(nlls)
-        # avg_pce = np.mean(pce_scores)
 
         # Build log dictionary
         log_dict = {
             "val/total_loss": avg_total_loss,
+            "val/loss_term": avg_loss_term,
             "val/raw_reg": avg_raw_reg,
-            "val/nll": avg_nll_score,
-            # "val/pce": avg_pce,
         }
 
-        # Update recent_losses and check for stabilization
-        # self.recent_losses.append(avg_nll_score) 
-
-
-        # Add each dimension of the PCE score
-        # for i, val in enumerate(avg_pce_score):
-        #     log_dict[f"val/pce_dim_{i+1}"] = val
-
         # Log to W&B
-        # wandb.log(log_dict)
+        wandb.log(log_dict)
 
         # Clear for next epoch
         self.validation_step_outputs.clear()
