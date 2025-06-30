@@ -89,7 +89,7 @@ class GaussianLightningModule(LightningModule):
     ):
         super().__init__()
         self.save_hyperparameters()
-        # wandb.init(project="multicalibration", entity = 'ryuzaki')
+        wandb.init(project="multicalibration", entity = 'ryuzaki')
 
         output_dim = output_dim
         # Output parameters: loc (output_dim) and scale_tril (output_dim * (output_dim + 1) // 2)
@@ -105,6 +105,8 @@ class GaussianLightningModule(LightningModule):
         )
         self.validation_step_outputs = []
         self.train_step_outputs = []
+        self.train_eigvals = []
+        self.val_eigvals = []
 
     def forward(self, x):
         out = self.model(x)
@@ -131,8 +133,7 @@ class GaussianLightningModule(LightningModule):
             loss_term = multivariate_energy_score(dist, y, n_samples=self.hparams.es_num_samples).mean()
         else:
             raise ValueError(f'Invalid loss: {self.hparams.loss}')
-        print(f"Checking {reg_val.requires_grad}, {reg_val.grad_fn}")
-        # pce_score = pce(dist, y) #return a list of d elements
+        
 
         reg_term = self.hparams.lambda_reg * reg_val
         total_loss = loss_term + reg_term
@@ -143,15 +144,20 @@ class GaussianLightningModule(LightningModule):
     def step(self, batch):
         x, y = batch
         dist = self(x)
+        loc, cov = dist.loc, dist.covariance_matrix
         total_loss, loss_term, raw_reg = self.compute_loss(dist, y)
-        return total_loss, loss_term, raw_reg
+        return total_loss, loss_term, raw_reg, loc, cov
 
     def training_step(self, batch, batch_idx):
-        total_loss, loss_term, raw_reg = self.step(batch)
+        total_loss, loss_term, raw_reg, loc, cov = self.step(batch)
+        if self.global_step == 0:
+            print(f"Checking {raw_reg.requires_grad}, {raw_reg.grad_fn}")
         self.train_step_outputs.append({
             "total_loss": total_loss.detach().cpu().numpy(), #float
             "loss_term": loss_term.detach().cpu().numpy(), #float
             "raw_reg": raw_reg.detach().cpu().numpy(), #float
+            "loc": loc.detach().cpu().numpy().mean(axis=0), # (B, D),
+            "cov": cov.detach().cpu().numpy().mean(axis=0), # (B, D, D)
         })
         return total_loss
 
@@ -159,30 +165,40 @@ class GaussianLightningModule(LightningModule):
         total_losses = []
         loss_terms = []
         raw_regs = []
+        locs = []
+        covs = []
 
         for out in self.train_step_outputs:
             total_losses.append(float(out["total_loss"]))
             raw_regs.append(float(out["raw_reg"]))
             loss_terms.append(float(out["loss_term"]))
-
+            locs.append(out["loc"])
+            covs.append(out["cov"])
+        
         avg_total_loss = np.mean(total_losses)
         avg_loss_term = np.mean(loss_terms)
         avg_raw_reg = np.mean(raw_regs)
-
+        avg_locs = np.mean(locs, axis=0)  # D
+        avg_covs = np.mean(covs, axis=0)  # D, D
+        eigvals = np.linalg.eigvals(avg_covs)
+        self.train_eigvals.append(eigvals)
         # Build log dictionary
         log_dict = {
             "train/total_loss": avg_total_loss,
             "train/loss_term": avg_loss_term,
-            "train/raw_reg": avg_raw_reg,   
+            "train/raw_reg": avg_raw_reg,
+            "train/avg_mean": np.mean(avg_locs),
+            "train/trace_cov": np.trace(avg_covs),
+            "train/det_cov": np.linalg.det(avg_covs),
         }
         # Log to W&B
-        # wandb.log(log_dict)
+        wandb.log(log_dict)
 
         # Clear for next epoch
         self.train_step_outputs.clear()
 
     def validation_step(self, batch, batch_idx):
-        total_loss, loss_term, raw_reg = self.step(batch)
+        total_loss, loss_term, raw_reg, loc, cov = self.step(batch)
         self.log(
             f'val/loss',
             total_loss,
@@ -194,6 +210,8 @@ class GaussianLightningModule(LightningModule):
             "total_loss": total_loss.detach().cpu().numpy(), #float
             "loss_term": loss_term.detach().cpu().numpy(), #float
             "raw_reg": raw_reg.detach().cpu().numpy(), #float
+            "loc": loc.detach().cpu().numpy().mean(axis=0), # (B, D),
+            "cov": cov.detach().cpu().numpy().mean(axis=0), # (B, D, D)
         })
         return total_loss
     
@@ -201,25 +219,35 @@ class GaussianLightningModule(LightningModule):
         total_losses = []
         loss_terms = []
         raw_regs = []
+        locs = []
+        covs = []
 
         for out in self.validation_step_outputs:
             total_losses.append(float(out["total_loss"]))
             loss_terms.append(float(out["loss_term"]))
             raw_regs.append(float(out["raw_reg"]))
+            locs.append(out["loc"])
+            covs.append(out["cov"])
 
         avg_total_loss = np.mean(total_losses)
         avg_loss_term = np.mean(loss_terms)
         avg_raw_reg = np.mean(raw_regs)
-
+        avg_locs = np.mean(locs, axis=0)  # D
+        avg_covs = np.mean(covs, axis=0)  # D, D
+        eigvals = np.linalg.eigvals(avg_covs)
+        self.val_eigvals.append(eigvals)
         # Build log dictionary
         log_dict = {
             "val/total_loss": avg_total_loss,
             "val/loss_term": avg_loss_term,
             "val/raw_reg": avg_raw_reg,
+            "val/avg_mean": np.mean(avg_locs),
+            "val/trace_cov": np.trace(avg_covs),
+            "val/det_cov": np.linalg.det(avg_covs),
         }
 
         # Log to W&B
-        # wandb.log(log_dict)
+        wandb.log(log_dict)
 
         # Clear for next epoch
         self.validation_step_outputs.clear()

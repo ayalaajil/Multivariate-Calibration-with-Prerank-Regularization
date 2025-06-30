@@ -64,16 +64,6 @@ def general_config(config):
             start_repeat_tuning=0,
             repeat_tuning=10,
             precomputation_level=PrecomputationLevel.RESULTS,
-
-            synthetic=dict(
-                n_samples=10000,
-                n_features=20,
-                n_targets=3,
-                mode="linear",  # or "linear" or "latent"
-                dependent_X=False,
-                coupled_outputs=False,
-                n_latent=2,
-            )
         )
     )
     config = OmegaConf.merge(default_config, config)
