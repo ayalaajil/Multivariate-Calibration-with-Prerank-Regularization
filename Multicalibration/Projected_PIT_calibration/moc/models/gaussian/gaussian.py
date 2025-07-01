@@ -6,7 +6,6 @@ from lightning.pytorch import LightningModule
 from torch.distributions import MultivariateNormal
 from moc.metrics.distribution_metrics import multivariate_energy_score, pce
 from pathlib import Path
-import wandb
 import numpy as np
 
 reg_path = Path(__file__).resolve().parents[2]
@@ -89,8 +88,6 @@ class GaussianLightningModule(LightningModule):
     ):
         super().__init__()
         self.save_hyperparameters()
-        #wandb.init(project="multicalibration", entity = 'ryuzaki')
-        #wandb.init(project="tuning_lambda")
 
         output_dim = output_dim
         # Output parameters: loc (output_dim) and scale_tril (output_dim * (output_dim + 1) // 2)
@@ -104,8 +101,6 @@ class GaussianLightningModule(LightningModule):
             hidden_size=self.hparams.hidden_size,
             num_layers=self.hparams.num_layers,
         )
-        self.validation_step_outputs = []
-        self.train_step_outputs = []
         self.train_eigvals = []
         self.val_eigvals = []
 
@@ -135,204 +130,44 @@ class GaussianLightningModule(LightningModule):
         else:
             raise ValueError(f'Invalid loss: {self.hparams.loss}')
         
-        pce_score = pce(dist, y, n_samples = self.hparams.es_num_samples, prerank = self.hparams.prerank)
-
 
         reg_term = self.hparams.lambda_reg * reg_val
         total_loss = loss_term + reg_term
 
-        return total_loss, loss_term.detach(), reg_val.detach(), pce_score
+        return total_loss, loss_term, reg_val
     
 
     def step(self, batch):
         x, y = batch
         dist = self(x)
-        total_loss, loss_term, reg_val, pce = self.compute_loss(dist, y)
-        return total_loss, loss_term, reg_val, pce
+        loc, cov = dist.loc, dist.covariance_matrix
+        total_loss, loss_term, raw_reg = self.compute_loss(dist, y)
+        return total_loss, loss_term, raw_reg, loc, cov
 
     def training_step(self, batch, batch_idx):
-        print("TRAIN")
-        total_loss, loss_term, reg_val, pce_score = self.step(batch)
-        self.train_step_outputs.append({
-            "total_loss": total_loss.detach().cpu().numpy(),
-            "loss_term": loss_term.cpu().numpy(),
-            "reg_val": reg_val.cpu().numpy(),
-            "pce_score": pce_score.detach().cpu().numpy(),
-        })
+        total_loss, loss_term, raw_reg, loc, cov = self.step(batch)
+        if self.global_step == 0:
+            print(f"Checking {raw_reg.requires_grad}, {raw_reg.grad_fn}")
+
+        self.log('train/total_loss', total_loss, on_step=False, on_epoch=True, prog_bar=False)
+        self.log('train/loss_term', loss_term, on_step=False, on_epoch=True, prog_bar=False)
+        self.log('train/raw_reg', raw_reg, on_step=False, on_epoch=True, prog_bar=False)
         return total_loss
     
+    def on_train_end(self):
+        print(f"Training completed at epoch {self.current_epoch + 1}")
 
 
-
-    def on_train_epoch_end(self):
-        total_losses = []
-        loss_terms = []
-        reg_vals = []
-        pce_scores = []
-
-        for out in self.train_step_outputs:
-            total_losses.append(float(out["total_loss"]))
-            loss_terms.append(float(out["loss_term"]))
-            reg_vals.append(float(out["reg_val"]))
-            pce_scores.append(np.array(out["pce_score"]))
-
-        log_dict = {
-            "train/total_loss": np.mean(total_losses),
-            "train/loss_term": np.mean(loss_terms),
-            "train/reg_val": np.mean(reg_vals),
-            "train/pce": np.mean(pce_scores),
-        }
-
-        wandb.log(log_dict)
-        self.train_step_outputs.clear()
-
-
-    
     def validation_step(self, batch, batch_idx):
-        print("VAL")
-        total_loss, loss_term, reg_val, pce_score = self.step(batch)
-        self.log(
-            f'val/loss',
-            total_loss,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=True,
-        )
-        self.validation_step_outputs.append({
-            "total_loss": total_loss.detach().cpu().item(),
-            "loss_term": loss_term.detach().cpu().item(),
-            "reg_val": reg_val.detach().cpu().item(),
-            "pce_score": pce_score.detach().cpu().numpy(),
-        })
-        return total_loss
+        total_loss, loss_term, raw_reg, loc, cov = self.step(batch)
 
-
-    '''
-    def training_step(self, batch, batch_idx):
-        total_loss = self.step(batch)
-        self.train_step_outputs.append({
-            "total_loss": total_loss.detach().cpu().numpy(), #float
-            "loss_term": loss_term.detach().cpu().numpy(), #float
-            "raw_reg": raw_reg.detach().cpu().numpy(), #float
-            "loc": loc.detach().cpu().numpy().mean(axis=0), # (B, D),
-            "cov": cov.detach().cpu().numpy().mean(axis=0), # (B, D, D)
-        })
-        return total_loss
-
-
-    def on_train_epoch_end(self):
-        total_losses = []
-
-        for out in self.train_step_outputs:
-            total_losses.append(float(out["total_loss"]))
-            raw_regs.append(float(out["raw_reg"]))
-            loss_terms.append(float(out["loss_term"]))
-            locs.append(out["loc"])
-            covs.append(out["cov"])
+        self.log('val/total_loss', total_loss, on_step=False, on_epoch=True, prog_bar=False)
+        self.log('val/loss_term', loss_term, on_step=False, on_epoch=True, prog_bar=False)
+        self.log('val/raw_reg', raw_reg, on_step=False, on_epoch=True, prog_bar=False)
         
-        avg_total_loss = np.mean(total_losses)
-        avg_loss_term = np.mean(loss_terms)
-        avg_raw_reg = np.mean(raw_regs)
-        avg_locs = np.mean(locs, axis=0)  # D
-        avg_covs = np.mean(covs, axis=0)  # D, D
-        eigvals = np.linalg.eigvals(avg_covs)
-        self.train_eigvals.append(eigvals)
-        # Build log dictionary
-        log_dict = {
-            "train/total_loss": avg_total_loss,
-            "train/loss_term": avg_loss_term,
-            "train/raw_reg": avg_raw_reg,
-            "train/avg_mean": np.mean(avg_locs),
-            "train/trace_cov": np.trace(avg_covs),
-            "train/det_cov": np.linalg.det(avg_covs),
-        }
-        # Log to W&B
-        wandb.log(log_dict)
-
-        # Clear for next epoch
-        self.train_step_outputs.clear()
-
-
-    def validation_step(self, batch, batch_idx):
-        total_loss = self.step(batch)
-        self.log(
-            f'val/loss',
-            total_loss,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=True,
-        )
-        self.validation_step_outputs.append({
-            "total_loss": total_loss.detach().cpu().numpy(), #float
-            "loss_term": loss_term.detach().cpu().numpy(), #float
-            "raw_reg": raw_reg.detach().cpu().numpy(), #float
-            "loc": loc.detach().cpu().numpy().mean(axis=0), # (B, D),
-            "cov": cov.detach().cpu().numpy().mean(axis=0), # (B, D, D)
-        })
         return total_loss
-
-
-    def on_validation_epoch_end(self):
-        total_losses = []
-        loss_terms = []
-        raw_regs = []
-        locs = []
-        covs = []
-
-        for out in self.validation_step_outputs:
-            total_losses.append(float(out["total_loss"]))
-            loss_terms.append(float(out["loss_term"]))
-            raw_regs.append(float(out["raw_reg"]))
-            locs.append(out["loc"])
-            covs.append(out["cov"])
-
-        avg_total_loss = np.mean(total_losses)
-        avg_loss_term = np.mean(loss_terms)
-        avg_raw_reg = np.mean(raw_regs)
-        avg_locs = np.mean(locs, axis=0)  # D
-        avg_covs = np.mean(covs, axis=0)  # D, D
-        eigvals = np.linalg.eigvals(avg_covs)
-        self.val_eigvals.append(eigvals)
-        # Build log dictionary
-        log_dict = {
-            "val/total_loss": avg_total_loss,
-            "val/loss_term": avg_loss_term,
-            "val/raw_reg": avg_raw_reg,
-            "val/avg_mean": np.mean(avg_locs),
-            "val/trace_cov": np.trace(avg_covs),
-            "val/det_cov": np.linalg.det(avg_covs),
-        }
-
-        # Log to W&B
-        wandb.log(log_dict)
-
-        # Clear for next epoch
-        self.validation_step_outputs.clear()'''
-
-    def on_validation_epoch_end(self):
-        total_losses = []
-        loss_terms = []
-        reg_vals = []
-        pce_scores = []
-
-        for out in self.validation_step_outputs:
-            total_losses.append(out["total_loss"])
-            loss_terms.append(out["loss_term"])
-            reg_vals.append(out["reg_val"])
-            pce_scores.append(np.array(out["pce_score"]))
-
-        log_dict = {
-            "val/total_loss": np.mean(total_losses),
-            "val/loss_term": np.mean(loss_terms),
-            "val/reg_val": np.mean(reg_vals),
-            "val/pce":  np.mean(pce_scores),
-        }
-
-        wandb.log(log_dict)
-
-        self.validation_step_outputs.clear()
-
-
+    
+    
     def configure_optimizers(self):
         return torch.optim.Adam(params=self.parameters(), lr=self.hparams.lr)
 

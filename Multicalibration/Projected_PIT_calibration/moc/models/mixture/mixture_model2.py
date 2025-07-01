@@ -4,7 +4,6 @@ import torch
 from lightning.pytorch import LightningModule
 from torch.distributions import MixtureSameFamily, Categorical, MultivariateNormal
 from sklearn.decomposition import PCA
-import wandb
 import numpy as np
 import sys
 from pathlib import Path
@@ -101,8 +100,7 @@ class MixtureLightningModule(LightningModule):
     ):
         super().__init__()
         self.save_hyperparameters()
-        wandb.init(project="multicalibration", entity = 'ryuzaki')
-
+        
         output_dim = output_dim
         mixture_size = self.hparams.mixture_size
         self.lambda_reg = lambda_reg
@@ -119,8 +117,8 @@ class MixtureLightningModule(LightningModule):
             num_layers=self.hparams.num_layers,
         )
         self.name = "GaussianMixture"
-        self.validation_step_outputs = []
-        self.train_step_outputs = []
+        # self.validation_step_outputs = []
+        # self.train_step_outputs = []
 
         # self.recent_losses = []
         # self.regularization_active = True #HERE
@@ -161,7 +159,6 @@ class MixtureLightningModule(LightningModule):
 
         return total_loss, loss_term, reg_val
 
-
     def step(self, batch):
         x, y = batch
         dist = self(x) #256 distributions in 4D
@@ -173,82 +170,24 @@ class MixtureLightningModule(LightningModule):
         total_loss, loss_term, raw_reg = self.step(batch)
         if self.global_step == 0:
             print(f"Checking {raw_reg.requires_grad}, {raw_reg.grad_fn}")
-        self.train_step_outputs.append({
-            "total_loss": total_loss.detach().cpu().numpy(), #float
-            "loss_term": loss_term.detach().cpu().numpy(), #float
-            "raw_reg": raw_reg.detach().cpu().numpy(), #float
-        })
+
+        self.log('train/total_loss', total_loss, on_step=False, on_epoch=True, prog_bar=False)
+        self.log('train/loss_term', loss_term, on_step=False, on_epoch=True, prog_bar=False)
+        self.log('train/raw_reg', raw_reg, on_step=False, on_epoch=True, prog_bar=False)
+
         return total_loss
-    
-    def on_train_epoch_end(self):
-        total_losses = []
-        loss_terms = []
-        raw_regs = []
 
-        for out in self.train_step_outputs:
-            total_losses.append(float(out["total_loss"]))
-            raw_regs.append(float(out["raw_reg"]))
-            loss_terms.append(float(out["loss_term"]))
-
-        avg_total_loss = np.mean(total_losses)
-        avg_loss_term = np.mean(loss_terms)
-        avg_raw_reg = np.mean(raw_regs)
-
-        # Build log dictionary
-        log_dict = {
-            "train/total_loss": avg_total_loss,
-            "train/loss_term": avg_loss_term,
-            "train/raw_reg": avg_raw_reg,   
-        }
-        # Log to W&B
-        wandb.log(log_dict)
-
-        # Clear for next epoch
-        self.train_step_outputs.clear()
-        
+    def on_train_end(self):
+        print(f"Training completed at epoch {self.current_epoch + 1}")    
 
     def validation_step(self, batch, batch_idx):
         total_loss, loss_term, raw_reg = self.step(batch)
-        self.log(
-            f'val/loss',
-            total_loss,
-            on_step=False,
-            on_epoch=True,
-            prog_bar=True,
-        )
-        self.validation_step_outputs.append({
-            "total_loss": total_loss.detach().cpu().numpy(), #float
-            "loss_term": loss_term.detach().cpu().numpy(), #float
-            "raw_reg": raw_reg.detach().cpu().numpy(), #float
-        })
+
+        self.log('val/total_loss', total_loss, on_step=False, on_epoch=True, prog_bar=False)
+        self.log('val/loss_term', loss_term, on_step=False, on_epoch=True, prog_bar=False)
+        self.log('val/raw_reg', raw_reg, on_step=False, on_epoch=True, prog_bar=False)
+
         return total_loss
-    
-    def on_validation_epoch_end(self):
-        total_losses = []
-        loss_terms = []
-        raw_regs = []
-
-        for out in self.validation_step_outputs:
-            total_losses.append(float(out["total_loss"]))
-            loss_terms.append(float(out["loss_term"]))
-            raw_regs.append(float(out["raw_reg"]))
-
-        avg_total_loss = np.mean(total_losses)
-        avg_loss_term = np.mean(loss_terms)
-        avg_raw_reg = np.mean(raw_regs)
-
-        # Build log dictionary
-        log_dict = {
-            "val/total_loss": avg_total_loss,
-            "val/loss_term": avg_loss_term,
-            "val/raw_reg": avg_raw_reg,
-        }
-
-        # Log to W&B
-        wandb.log(log_dict)
-
-        # Clear for next epoch
-        self.validation_step_outputs.clear()
 
     def configure_optimizers(self):
         return torch.optim.Adam(params=self.parameters(), lr=self.hparams.lr)

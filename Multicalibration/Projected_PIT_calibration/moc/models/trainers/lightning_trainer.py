@@ -5,19 +5,21 @@ from lightning.pytorch.callbacks import (
     ModelCheckpoint,
 )
 import torch
+import wandb
+from lightning.pytorch.loggers import WandbLogger
 
-class CustomLogger(Callback):
-    def __init__(self):
-        self.train_losses = []
-        self.val_losses = []
+# class CustomLogger(Callback):
+#     def __init__(self):
+#         self.train_losses = []
+#         self.val_losses = []
 
-    def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
-        loss = outputs['loss'].item()
-        self.train_losses.append(loss)
+#     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
+#         loss = outputs['loss'].item()
+#         self.train_losses.append(loss)
 
-    def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
-        loss = outputs.item()
-        self.val_losses.append(loss)
+#     def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
+#         loss = outputs.item()
+#         self.val_losses.append(loss)
 
 
 def get_lightning_trainer(rc):
@@ -30,9 +32,14 @@ def get_lightning_trainer(rc):
     # - Measure validation loss every 4 * val_size // batch_size steps
     #   - We can afford to measure validation during one fifth of the training
     # - Patience of 15
+    wandb_logger = WandbLogger(
+        project="multicalibration",
+        name = f"{rc.dataset}_{rc.hparams['prerank']}_{rc.hparams['model']}",
+        log_model="best", #only the best model checkpoint will be uploaded to wandb
+    )
 
     ckpt = ModelCheckpoint(
-        monitor='val/loss',
+        monitor='val/total_loss',
         mode='min',
         save_top_k=1,  # save k best models (determined by above metric)
         save_last=False,  # save model from last epoch
@@ -43,14 +50,14 @@ def get_lightning_trainer(rc):
     )
 
     es = EarlyStopping(
-        monitor='val/loss',
+        monitor='val/total_loss',
         mode='min',
         patience=15,
         min_delta=1e-4,
         verbose = False,
     )
 
-    callbacks = [ckpt, es, CustomLogger()]
+    callbacks = [ckpt, es]
 
     accelerator = {
         'cpu': 'cpu',
@@ -69,5 +76,6 @@ def get_lightning_trainer(rc):
         enable_model_summary=False,
         enable_progress_bar=False,
         callbacks=callbacks,
-        logger=False,
+        logger=wandb_logger,
+        # deterministic = True,
     )
