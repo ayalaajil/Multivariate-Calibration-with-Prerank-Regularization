@@ -1,0 +1,8 @@
+#!/bin/bash
+#SBATCH --job-name=tune_mean_prerank
+#SBATCH --output=slurm_mean.out   
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=8G
+#SBATCH --gres=gpu:1          
+
+python tuning_mean.py

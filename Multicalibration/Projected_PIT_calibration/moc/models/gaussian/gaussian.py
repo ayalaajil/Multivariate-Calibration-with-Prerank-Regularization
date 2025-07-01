@@ -89,7 +89,8 @@ class GaussianLightningModule(LightningModule):
     ):
         super().__init__()
         self.save_hyperparameters()
-        wandb.init(project="multicalibration", entity = 'ryuzaki')
+        #wandb.init(project="multicalibration", entity = 'ryuzaki')
+        #wandb.init(project="tuning_lambda")
 
         output_dim = output_dim
         # Output parameters: loc (output_dim) and scale_tril (output_dim * (output_dim + 1) // 2)
@@ -134,24 +135,81 @@ class GaussianLightningModule(LightningModule):
         else:
             raise ValueError(f'Invalid loss: {self.hparams.loss}')
         
+        pce_score = pce(dist, y, n_samples = self.hparams.es_num_samples, prerank = self.hparams.prerank)
+
 
         reg_term = self.hparams.lambda_reg * reg_val
         total_loss = loss_term + reg_term
 
-        return total_loss, loss_term, reg_val
+        return total_loss, loss_term.detach(), reg_val.detach(), pce_score
     
 
     def step(self, batch):
         x, y = batch
         dist = self(x)
-        loc, cov = dist.loc, dist.covariance_matrix
-        total_loss, loss_term, raw_reg = self.compute_loss(dist, y)
-        return total_loss, loss_term, raw_reg, loc, cov
+        total_loss, loss_term, reg_val, pce = self.compute_loss(dist, y)
+        return total_loss, loss_term, reg_val, pce
 
     def training_step(self, batch, batch_idx):
-        total_loss, loss_term, raw_reg, loc, cov = self.step(batch)
-        if self.global_step == 0:
-            print(f"Checking {raw_reg.requires_grad}, {raw_reg.grad_fn}")
+        print("TRAIN")
+        total_loss, loss_term, reg_val, pce_score = self.step(batch)
+        self.train_step_outputs.append({
+            "total_loss": total_loss.detach().cpu().numpy(),
+            "loss_term": loss_term.cpu().numpy(),
+            "reg_val": reg_val.cpu().numpy(),
+            "pce_score": pce_score.detach().cpu().numpy(),
+        })
+        return total_loss
+    
+
+
+
+    def on_train_epoch_end(self):
+        total_losses = []
+        loss_terms = []
+        reg_vals = []
+        pce_scores = []
+
+        for out in self.train_step_outputs:
+            total_losses.append(float(out["total_loss"]))
+            loss_terms.append(float(out["loss_term"]))
+            reg_vals.append(float(out["reg_val"]))
+            pce_scores.append(np.array(out["pce_score"]))
+
+        log_dict = {
+            "train/total_loss": np.mean(total_losses),
+            "train/loss_term": np.mean(loss_terms),
+            "train/reg_val": np.mean(reg_vals),
+            "train/pce": np.mean(pce_scores),
+        }
+
+        wandb.log(log_dict)
+        self.train_step_outputs.clear()
+
+
+    
+    def validation_step(self, batch, batch_idx):
+        print("VAL")
+        total_loss, loss_term, reg_val, pce_score = self.step(batch)
+        self.log(
+            f'val/loss',
+            total_loss,
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
+        self.validation_step_outputs.append({
+            "total_loss": total_loss.detach().cpu().item(),
+            "loss_term": loss_term.detach().cpu().item(),
+            "reg_val": reg_val.detach().cpu().item(),
+            "pce_score": pce_score.detach().cpu().numpy(),
+        })
+        return total_loss
+
+
+    '''
+    def training_step(self, batch, batch_idx):
+        total_loss = self.step(batch)
         self.train_step_outputs.append({
             "total_loss": total_loss.detach().cpu().numpy(), #float
             "loss_term": loss_term.detach().cpu().numpy(), #float
@@ -161,12 +219,9 @@ class GaussianLightningModule(LightningModule):
         })
         return total_loss
 
+
     def on_train_epoch_end(self):
         total_losses = []
-        loss_terms = []
-        raw_regs = []
-        locs = []
-        covs = []
 
         for out in self.train_step_outputs:
             total_losses.append(float(out["total_loss"]))
@@ -197,8 +252,9 @@ class GaussianLightningModule(LightningModule):
         # Clear for next epoch
         self.train_step_outputs.clear()
 
+
     def validation_step(self, batch, batch_idx):
-        total_loss, loss_term, raw_reg, loc, cov = self.step(batch)
+        total_loss = self.step(batch)
         self.log(
             f'val/loss',
             total_loss,
@@ -214,7 +270,8 @@ class GaussianLightningModule(LightningModule):
             "cov": cov.detach().cpu().numpy().mean(axis=0), # (B, D, D)
         })
         return total_loss
-    
+
+
     def on_validation_epoch_end(self):
         total_losses = []
         loss_terms = []
@@ -250,7 +307,31 @@ class GaussianLightningModule(LightningModule):
         wandb.log(log_dict)
 
         # Clear for next epoch
+        self.validation_step_outputs.clear()'''
+
+    def on_validation_epoch_end(self):
+        total_losses = []
+        loss_terms = []
+        reg_vals = []
+        pce_scores = []
+
+        for out in self.validation_step_outputs:
+            total_losses.append(out["total_loss"])
+            loss_terms.append(out["loss_term"])
+            reg_vals.append(out["reg_val"])
+            pce_scores.append(np.array(out["pce_score"]))
+
+        log_dict = {
+            "val/total_loss": np.mean(total_losses),
+            "val/loss_term": np.mean(loss_terms),
+            "val/reg_val": np.mean(reg_vals),
+            "val/pce":  np.mean(pce_scores),
+        }
+
+        wandb.log(log_dict)
+
         self.validation_step_outputs.clear()
+
 
     def configure_optimizers(self):
         return torch.optim.Adam(params=self.parameters(), lr=self.hparams.lr)
