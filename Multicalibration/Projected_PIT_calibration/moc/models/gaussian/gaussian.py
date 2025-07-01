@@ -6,7 +6,6 @@ from lightning.pytorch import LightningModule
 from torch.distributions import MultivariateNormal
 from moc.metrics.distribution_metrics import multivariate_energy_score, pce
 from pathlib import Path
-import wandb
 import numpy as np
 
 reg_path = Path(__file__).resolve().parents[2]
