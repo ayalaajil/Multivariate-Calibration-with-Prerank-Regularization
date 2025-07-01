@@ -1,4 +1,5 @@
 from datetime import datetime
+import pytz
 from pathlib import Path
 from enum import IntEnum
 
@@ -23,8 +24,8 @@ def get_log_dir(config):
     if config.name is not None:
         log_dir /= config.name
     else:
-        log_dir /= datetime.now().strftime(r'%Y-%m-%d')
-        log_dir /= datetime.now().strftime(r'%H-%M-%S')
+        log_dir /= datetime.now(pytz.timezone('Asia/Dubai')).strftime(r'%Y-%m-%d')
+        log_dir /= datetime.now(pytz.timezone('Asia/Dubai')).strftime(r'%H-%M-%S')
     return log_dir
 
 
