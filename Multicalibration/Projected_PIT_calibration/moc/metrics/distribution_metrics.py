@@ -2,6 +2,10 @@ import torch
 import torch.nn.functional as F
 import numpy as np
 import torch.nn.functional as F
+from sklearn.decomposition import PCA
+from .preranks import get_prerank
+
+
 def nll(model, x, y):
     dist = model.predict(x)
     return -dist.log_prob(y).detach()
@@ -69,12 +73,6 @@ def empirical_cdf(dist, values: torch.Tensor, n_samples=10_000) -> torch.Tensor:
 
 def calculate_PIT(dist, y, n_samples, prerank):
     batch_size, dim = y.shape
-    '''if setup == 'simulated':
-        samples = dist.sample((batch_size*n_samples,)).reshape(batch_size, n_samples, dim) #10000, 1000, 10  #HEEEERE rsample
-        print("1")
-    else: 
-        samples = dist.sample((n_samples,)).permute(1, 0, 2) #256,20,4 # HEEERE rsample
-        print("2")'''
     samples = sample(dist, n_samples)
     pits = []
     explained_var = np.ones(dim) * (1/dim)

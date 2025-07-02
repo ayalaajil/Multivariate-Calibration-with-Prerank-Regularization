@@ -33,7 +33,7 @@ def get_lightning_trainer(rc):
     #   - We can afford to measure validation during one fifth of the training
     # - Patience of 15
     wandb_logger = WandbLogger(
-        project="multicalibration",
+        project="multicalibration-tuning",
         name = f"{rc.dataset}_{rc.hparams['prerank']}_{rc.hparams['model']}",
         log_model="best", #only the best model checkpoint will be uploaded to wandb
     )
