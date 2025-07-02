@@ -108,7 +108,6 @@ def calculate_PIT(dist, y, n_samples, prerank):
         log_densities_samples = []
         for i in range(n_samples):
             log_density = dist.log_prob(samples[:, i, :]) #torch.Size([256])
-            print(log_density.shape)
             log_densities_samples.append(log_density) #256
         
         log_densities_samples = torch.stack(log_densities_samples).permute(1,0) #torch.Size([106, 100]) or torch.Size([256, 100])
