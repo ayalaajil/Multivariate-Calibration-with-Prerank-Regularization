@@ -1,5 +1,6 @@
 from moc.utils.run_config import RunConfig
 from moc.models.mixture.mixture_model2 import MixtureLightningModule
+from moc.models.gaussian.gaussian import GaussianLightningModule
 from moc.models.trainers.lightning_trainer import get_lightning_trainer
 from moc.datamodules.real_datamodule import RealDataModule
 from moc.metrics.distribution_metrics import pce
@@ -20,10 +21,10 @@ dataset_names = [
                 #  ['cevid', 'births2'], ['cevid', 'wage'], ['mulan', 'scm20d'],
                 #  ['mulan', 'rf2'], ['mulan', 'rf1'], ['mulan', 'scm1d'],
                 #  ['mulan', 'atp1d'], ['mulan', 'atp7d'], ['mulan', 'oes97'],
-                #  ['mulan', 'oes10'], ['mulan', 'jura'], ['mulan', 'sf1'],
+                  ['mulan', 'oes10']#, ['mulan', 'jura'], ['mulan', 'sf1'],
                 #  ['mulan', 'sf2'], ['mulan', 'wq'], ['mulan', 'enb'],
                 #  ['mulan', 'slump'], 
-                 ['mulan', 'osales'], 
+                # ['mulan', 'osales'], 
                 #  ['mulan', 'scpf'], 
                 #  ['feldman', 'meps_21'], ['feldman', 'meps_19'], ['feldman', 'meps_20'], 
                 #  ['feldman', 'house'], ['feldman', 'bio'], ['feldman', 'blog_data'], 
@@ -37,11 +38,17 @@ def select_best_lambda(config, data_group, data_name, prerank, seeds, lambda_val
     results = []
     for lambda_reg in lambda_values:
         pces = []
+        hparams = {
+            'model': 'gaussian',
+            'prerank': 'base',
+            'lambda':lambda_reg,
+        }
         for seed in seeds:
-            rc = RunConfig(config, data_group, data_name, seed=seed)
+            rc = RunConfig(config, data_group, data_name, hparams = hparams)
             datamodule = RealDataModule(rc, seed=seed, num_workers=8)
             p, q = datamodule.input_dim, datamodule.output_dim
-            model = MixtureLightningModule(p, q, lambda_reg=lambda_reg, reg_type='pce-kde', prerank=prerank)
+            #model = MixtureLightningModule(p, q, lambda_reg=lambda_reg, reg_type='pce-kde', prerank=prerank)
+            model = GaussianLightningModule(p, q, lambda_reg=lambda_reg, reg_type='pce-kde', prerank=prerank)
             trainer = get_lightning_trainer(rc)
             trainer.fit(model, datamodule)
             model.to(config.device)
@@ -68,9 +75,14 @@ def select_best_lambda(config, data_group, data_name, prerank, seeds, lambda_val
 def evaluate_and_plot_reliability(config, data_group, data_name, prerank, seeds, lambda_reg, plot_path="reliability_plot.pdf"):
 
     pce_over_seeds, cdf_over_seeds = [], []
+    hparams = {
+            'model': 'gaussian',
+            'prerank': 'base',
+            'lambda':lambda_reg,
+        }
     for seed in seeds:
         print(f"Working on dataset {data_group} {data_name} {prerank} seed {seed}")
-        rc = RunConfig(config, data_group, data_name, seed=seed)
+        rc = RunConfig(config, data_group, data_name, hparams = hparams)
         datamodule = RealDataModule(rc, seed=seed, num_workers=8)
         p, q = datamodule.input_dim, datamodule.output_dim
         model = MixtureLightningModule(p, q, lambda_reg=lambda_reg, reg_type='pce-kde', prerank=prerank)
@@ -127,15 +139,15 @@ def evaluate_and_plot_reliability(config, data_group, data_name, prerank, seeds,
 best_lambda = select_best_lambda(
     config=config,
     data_group='mulan',
-    data_name='sf2',
-    prerank='cdf',
+    data_name='oes10',
+    prerank='density',
     seeds=[42],
     lambda_values=[0.001, 0.01, 0.1, 1]
 )
 
 data_group='mulan'
-data_name='sf2'
-prerank = 'cdf'
+data_name='oes10'
+prerank = 'density'
 
 # Step 2 : analyze and plot
 evaluate_and_plot_reliability(
