@@ -149,9 +149,8 @@ class BaseDataModule(LightningDataModule):
 
     def get_dataloader(self, dataset, drop_last=False, shuffle=False, batch_size=None):
         if batch_size is None:
-            batch_size = self.rc.config.default_batch_size
+            batch_size = self.rc.config.default_batch_size #256
         batch_size = min(len(dataset), batch_size)
-
         return DataLoader(
             dataset=dataset,
             batch_size=batch_size,
@@ -162,7 +161,7 @@ class BaseDataModule(LightningDataModule):
         )
 
     def train_dataloader(self):
-        return self.get_dataloader(self.data_train, drop_last=True, shuffle=True)
+        return self.get_dataloader(self.data_train, drop_last=False, shuffle=True)
     
     def val_dataloader(self):
         return self.get_dataloader(self.data_val) 

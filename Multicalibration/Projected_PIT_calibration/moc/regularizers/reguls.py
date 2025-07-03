@@ -108,4 +108,5 @@ def pce_kde_regularization(dist, y, prerank, n_samples = 100, M = 100, tau = 100
     if prerank == 'pca':
         explained_var = torch.from_numpy(_).to(pce_kdes.device)
         return (pce_kdes * explained_var).sum()
-    else: return pce_kdes.mean()
+    else: 
+        return pce_kdes.mean()

@@ -117,13 +117,10 @@ class MixtureLightningModule(LightningModule):
             num_layers=self.hparams.num_layers,
         )
         self.name = "GaussianMixture"
-        # self.validation_step_outputs = []
-        # self.train_step_outputs = []
-
-        # self.recent_losses = []
-        # self.regularization_active = True #HERE
-        # self.stabilization_patience = 5
-        # self.stabilization_threshold = 1e-1 
+        self.train_cdfs = []
+        self.val_cdfs = []
+        self.total_train_cdfs = []
+        self.total_val_cdfs = []
 
     def forward(self, x):
         out = self.model(x) #(batch_size, 75)
@@ -153,7 +150,7 @@ class MixtureLightningModule(LightningModule):
             loss_term = multivariate_energy_score(dist, y, n_samples=self.hparams.es_num_samples).mean()
         else:
             raise ValueError(f'Invalid loss: {self.hparams.loss}')
-        # pce_score = pce(dist, y, n_samples = self.hparams.es_num_samples, prerank = self.hparams.prerank) #return a list of d elements
+        
         reg_term = self.hparams.lambda_reg * reg_val
         total_loss = loss_term + reg_term
 
@@ -161,33 +158,48 @@ class MixtureLightningModule(LightningModule):
 
     def step(self, batch):
         x, y = batch
-        dist = self(x) #256 distributions in 4D
-        # print(dist.mean.requires_grad) #printed True
+        dist = self(x)
+
         total_loss, loss_term, raw_reg = self.compute_loss(dist, y)
-        return total_loss, loss_term, raw_reg
+
+        pce_val, cdfs = pce(dist, y, n_samples=self.hparams.es_num_samples, prerank=self.hparams.prerank)
+
+        return total_loss, loss_term, raw_reg, pce_val, cdfs
 
     def training_step(self, batch, batch_idx):
-        total_loss, loss_term, raw_reg = self.step(batch)
+        total_loss, loss_term, raw_reg, pce_val, cdfs = self.step(batch)
+
         if self.global_step == 0:
             print(f"Checking {raw_reg.requires_grad}, {raw_reg.grad_fn}")
 
         self.log('train/total_loss', total_loss, on_step=False, on_epoch=True, prog_bar=False)
         self.log('train/loss_term', loss_term, on_step=False, on_epoch=True, prog_bar=False)
         self.log('train/raw_reg', raw_reg, on_step=False, on_epoch=True, prog_bar=False)
+        self.log('train/pce_val', pce_val, on_step=False, on_epoch=True, prog_bar=False)
+        self.train_cdfs.append(cdfs)
 
-        return total_loss
-
-    def on_train_end(self):
-        print(f"Training completed at epoch {self.current_epoch + 1}")    
+        return total_loss 
 
     def validation_step(self, batch, batch_idx):
-        total_loss, loss_term, raw_reg = self.step(batch)
+        total_loss, loss_term, raw_reg, pce_val, cdfs = self.step(batch)
 
         self.log('val/total_loss', total_loss, on_step=False, on_epoch=True, prog_bar=False)
         self.log('val/loss_term', loss_term, on_step=False, on_epoch=True, prog_bar=False)
         self.log('val/raw_reg', raw_reg, on_step=False, on_epoch=True, prog_bar=False)
+        self.log('val/pce_val', pce_val, on_step=False, on_epoch=True, prog_bar=False)
+        self.val_cdfs.append(cdfs)
 
         return total_loss
+
+    def on_train_epoch_end(self):
+        train_cdfs = torch.cat(self.train_cdfs, dim=0).mean(dim=0)
+        self.total_train_cdfs.append(train_cdfs)
+        self.train_cdfs = []
+
+    def on_validation_epoch_end(self):
+        val_cdfs = torch.cat(self.val_cdfs, dim=0).mean(dim=0)
+        self.total_val_cdfs.append(val_cdfs)
+        self.val_cdfs = []
 
     def configure_optimizers(self):
         return torch.optim.Adam(params=self.parameters(), lr=self.hparams.lr)
