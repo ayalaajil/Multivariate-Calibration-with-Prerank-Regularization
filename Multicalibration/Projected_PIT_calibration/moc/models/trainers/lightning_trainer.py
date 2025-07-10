@@ -33,13 +33,13 @@ def get_lightning_trainer(rc):
     #   - We can afford to measure validation during one fifth of the training
     # - Patience of 15
     wandb_logger = WandbLogger(
-        project="multicalibration",
-        name = f"{rc.dataset}_{rc.hparams['prerank']}_{rc.hparams['model']}",
+        project="multicalibration-tuning2",
+        name = f"{rc.dataset}_{rc.hparams['prerank']}_{rc.hparams['model']}_{rc.hparams['lambda']}",
         log_model="best", #only the best model checkpoint will be uploaded to wandb
     )
 
     ckpt = ModelCheckpoint(
-        monitor='val/total_loss',
+        monitor='val/nll',
         mode='min',
         save_top_k=1,  # save k best models (determined by above metric)
         save_last=False,  # save model from last epoch
@@ -50,7 +50,7 @@ def get_lightning_trainer(rc):
     )
 
     es = EarlyStopping(
-        monitor='val/total_loss',
+        monitor='val/nll',
         mode='min',
         patience=15,
         min_delta=1e-4,
@@ -76,6 +76,6 @@ def get_lightning_trainer(rc):
         enable_model_summary=False,
         enable_progress_bar=False,
         callbacks=callbacks,
-        logger=wandb_logger,
+        # logger=wandb_logger,
         # deterministic = True,
     )

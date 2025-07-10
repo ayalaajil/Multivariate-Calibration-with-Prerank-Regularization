@@ -48,24 +48,24 @@ def multivariate_energy_score(dist, y, n_samples = 100):
 
     return (term1 - term2).mean()
 
-def empirical_cdf(dist, values: torch.Tensor, n_samples=10_000) -> torch.Tensor:
+def empirical_cdf(dist, x, n_samples=100, tau = 100) -> torch.Tensor:
     """
     Args:
-        values: (batch_size, d)
-        samples: (n_samples, d)
-
+        x: (batch_size, d) 256, 3
     Returns:
         cdf_vals: (batch_size,) — \hat{F}_n(values[i]) for all i
     """
 
-    samples = sample(dist,n_samples).permute(1, 0, 2) 
-    comparison = samples <= values # (batch_size, n_samples, d)
-    tau=1
-    comparison =  torch.sigmoid(tau *(values-samples)).float() #torch.Size([10000, 256, 3]
-    dominated =comparison.prod(dim=2) # (batch_size, n_samples)
-    counts = dominated.mean(dim=0)      # (batch_size,)
-    cdf_vals = counts.float() / samples.shape[0]
-    return cdf_vals
+    samples = sample(dist, n_samples) #256, 100, 3
+    x = x.unsqueeze(1) # 256, 1, 3
+    # comparison = samples <= values # (batch_size, n_samples, d)
+    # tau=1
+    # comparison =  torch.sigmoid(tau *(values-samples)).float() #torch.Size([10000, 256, 3]
+    # dominated =comparison.prod(dim=2) # (batch_size, n_samples)
+    # counts = dominated.mean(dim=0)      # (batch_size,)
+    # cdf_vals = counts.float() / samples.shape[0]
+    cdf_at_x = torch.sigmoid(tau * (x - samples)).prod(dim=2).mean(dim=1)
+    return cdf_at_x
 
 def calculate_PIT(dist, y, n_samples, prerank, tau = 100):
     batch_size, dim = y.shape
@@ -95,26 +95,23 @@ def calculate_PIT(dist, y, n_samples, prerank, tau = 100):
             cdfs =  torch.sigmoid(tau *(y_proj.unsqueeze(-1) - sample_proj)).mean(dim=1, keepdim=True)
             pits.append(cdfs)
     elif prerank =='density':
-        #samples are of shape 256, 100, 4
-        log_densities_samples = []
+        log_pdf_samples = []
         for i in range(n_samples):
-            log_density = dist.log_prob(samples[:, i, :]) #10000,10
-            log_densities_samples.append(log_density) #256
-        log_densities_samples = torch.stack(log_densities_samples).permute(1,0)
-        # log_densities_samples = dist.log_prob(samples)#256,100
-        log_densities_y = dist.log_prob(y) #256
-        cdfs =  torch.sigmoid(tau *(log_densities_y.unsqueeze(-1) -log_densities_samples)).mean(dim=1, keepdim=True)
+            log_pdf = dist.log_prob(samples[:, i, :]) 
+            log_pdf_samples.append(log_pdf) #256
+        log_pdf_samples = torch.stack(log_pdf_samples).permute(1,0)
+        log_pdf_y = dist.log_prob(y) #256
+        cdfs =  torch.sigmoid(tau *(log_pdf_y.unsqueeze(-1) - log_pdf_samples)).mean(dim=1, keepdim=True)
         pits.append(cdfs)
     elif prerank == 'cdf':
-        # samples: (256, 100, 4)
-        # y: (256, 4)
+        #samples 256, 100, 3
+        cdfs = torch.sigmoid(tau * (y.unsqueeze(1) - samples)).prod(dim=2).mean(dim=1, keepdim=True) # 256, 1
         cdfs_samples = []
         for i in range(n_samples):
-            print(samples[:, i, :].shape) # torch.Size([256, 3])
-            cdf_sample = empirical_cdf(dist,samples[:, i, :])  # torch.Size([256])
+            cdf_sample = empirical_cdf(dist,samples[:, i, :])  # 256
             cdfs_samples.append(cdf_sample)
         cdfs_samples = torch.stack(cdfs_samples).permute(1,0)  # shape: (256, 100)
-        cdfs_y = empirical_cdf(dist, y)  # shape: (256,)
+        cdfs_y = empirical_cdf(dist, y)
         # Apply sigmoid smoothing around CDF difference
         prerank_cdfs = torch.sigmoid(tau * (cdfs_y.unsqueeze(1) - cdfs_samples)).mean(dim=1, keepdim=True)  # shape: (256,1)
         pits.append(prerank_cdfs)
@@ -138,8 +135,8 @@ def pce(dist, y, n_samples = 100, prerank = 'pca'):
         cdfs.append(cdf_estimates)
     pces = torch.stack(pces)
     cdfs = torch.stack(cdfs)
-    if prerank == 'pca':
-        explained_var = torch.from_numpy(_).to(pces.device)
-        return (pces * explained_var).sum(), cdfs
-    else: return pces.mean(), cdfs
+    # if prerank == 'pca':
+    #     explained_var = torch.from_numpy(_).to(pces.device)
+    #     return (pces * explained_var).sum(), cdfs
+    return pces, cdfs
     

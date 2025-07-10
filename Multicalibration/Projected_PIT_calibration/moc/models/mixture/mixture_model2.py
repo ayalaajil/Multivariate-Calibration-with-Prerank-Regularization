@@ -96,15 +96,16 @@ class MixtureLightningModule(LightningModule):
         lr=1e-4, #was 1e-4 BEFORE
         lambda_reg: float = 0.0,
         reg_type: str = 'none',
-        prerank: str = 'none'
+        prerank: str = 'none',
+        warmup_epochs: int = 0,
     ):
         super().__init__()
         self.save_hyperparameters()
         
-        output_dim = output_dim
         mixture_size = self.hparams.mixture_size
         self.lambda_reg = lambda_reg
         self.reg_type = reg_type
+        self.warmup_epochs = warmup_epochs
         self.output_shape = (
             mixture_size,
             mixture_size * output_dim,
@@ -121,6 +122,7 @@ class MixtureLightningModule(LightningModule):
         self.val_cdfs = []
         self.total_train_cdfs = []
         self.total_val_cdfs = []
+        self.regularization_active = False
 
     def forward(self, x):
         out = self.model(x) #(batch_size, 75)
@@ -128,7 +130,7 @@ class MixtureLightningModule(LightningModule):
         params = extract_multivariate_normal_mixture_parameters(
             out,
             mixture_size=self.hparams.mixture_size,
-            output_dim=self.trainer.datamodule.output_dim,
+            output_dim=self.hparams.output_dim,
         )
         return create_multivariate_normal_mixture(*params)
     
@@ -138,11 +140,11 @@ class MixtureLightningModule(LightningModule):
     def compute_loss(self, dist, y):
 
         reg_val = torch.zeros(1).to(y.device)
-        # if self.regularization_active:
-        if self.hparams.reg_type == 'truncation':
-            reg_val = truncation_regularization(dist, y)
-        elif self.hparams.reg_type == 'pce-kde':
-            reg_val = pce_kde_regularization(dist, y, n_samples = self.hparams.es_num_samples, prerank = self.hparams.prerank)
+        if self.regularization_active:
+            if self.hparams.reg_type == 'truncation':
+                reg_val = truncation_regularization(dist, y)
+            elif self.hparams.reg_type == 'pce-kde':
+                reg_val = pce_kde_regularization(dist, y, n_samples = self.hparams.es_num_samples, prerank = self.hparams.prerank)
 
         if self.hparams.loss == 'nll':
             loss_term = -dist.log_prob(y).mean()
@@ -163,43 +165,48 @@ class MixtureLightningModule(LightningModule):
         total_loss, loss_term, raw_reg = self.compute_loss(dist, y)
 
         pce_val, cdfs = pce(dist, y, n_samples=self.hparams.es_num_samples, prerank=self.hparams.prerank)
+        energy_score = multivariate_energy_score(dist, y, n_samples=self.hparams.es_num_samples).mean()
 
-        return total_loss, loss_term, raw_reg, pce_val, cdfs
+        return total_loss, loss_term, raw_reg, pce_val, cdfs, energy_score
+
+    def on_train_epoch_start(self):
+        self.regularization_active = self.current_epoch >= self.warmup_epochs
 
     def training_step(self, batch, batch_idx):
-        total_loss, loss_term, raw_reg, pce_val, cdfs = self.step(batch)
-
+        total_loss, loss_term, raw_reg, pce_val, cdfs, energy_score = self.step(batch)
         if self.global_step == 0:
             print(f"Checking {raw_reg.requires_grad}, {raw_reg.grad_fn}")
 
         self.log('train/total_loss', total_loss, on_step=False, on_epoch=True, prog_bar=False)
-        self.log('train/loss_term', loss_term, on_step=False, on_epoch=True, prog_bar=False)
+        self.log('train/nll', loss_term, on_step=False, on_epoch=True, prog_bar=False)
         self.log('train/raw_reg', raw_reg, on_step=False, on_epoch=True, prog_bar=False)
-        self.log('train/pce_val', pce_val, on_step=False, on_epoch=True, prog_bar=False)
-        self.train_cdfs.append(cdfs)
+        # self.log('train/pce_val', pce_val, on_step=False, on_epoch=True, prog_bar=False)
+        # self.train_cdfs.append(cdfs)
 
         return total_loss 
 
     def validation_step(self, batch, batch_idx):
-        total_loss, loss_term, raw_reg, pce_val, cdfs = self.step(batch)
+        total_loss, loss_term, raw_reg, pce_val, cdfs, energy_score = self.step(batch)
 
-        self.log('val/total_loss', total_loss, on_step=False, on_epoch=True, prog_bar=False)
-        self.log('val/loss_term', loss_term, on_step=False, on_epoch=True, prog_bar=False)
-        self.log('val/raw_reg', raw_reg, on_step=False, on_epoch=True, prog_bar=False)
-        self.log('val/pce_val', pce_val, on_step=False, on_epoch=True, prog_bar=False)
-        self.val_cdfs.append(cdfs)
+        # self.log('val/total_loss', total_loss, on_step=False, on_epoch=True, prog_bar=False)
+        self.log('val/nll', loss_term, on_step=False, on_epoch=True, prog_bar=False)
+        # self.log('val/raw_reg', raw_reg, on_step=False, on_epoch=True, prog_bar=False)
+        self.log('val/pce_val', pce_val.mean(), on_step=False, on_epoch=True, prog_bar=False)
+        self.log('val/energy_score', energy_score, on_step=False, on_epoch=True, prog_bar=False)
+        #add the energy score here
+        # self.val_cdfs.append(cdfs)
 
         return total_loss
 
-    def on_train_epoch_end(self):
-        train_cdfs = torch.cat(self.train_cdfs, dim=0).mean(dim=0)
-        self.total_train_cdfs.append(train_cdfs)
-        self.train_cdfs = []
+    # def on_train_epoch_end(self):
+    #     train_cdfs = torch.cat(self.train_cdfs, dim=0).mean(dim=0)
+    #     self.total_train_cdfs.append(train_cdfs)
+    #     self.train_cdfs = []
 
-    def on_validation_epoch_end(self):
-        val_cdfs = torch.cat(self.val_cdfs, dim=0).mean(dim=0)
-        self.total_val_cdfs.append(val_cdfs)
-        self.val_cdfs = []
+    # def on_validation_epoch_end(self):
+    #     val_cdfs = torch.cat(self.val_cdfs, dim=0).mean(dim=0)
+    #     self.total_val_cdfs.append(val_cdfs)
+    #     self.val_cdfs = []
 
     def configure_optimizers(self):
         return torch.optim.Adam(params=self.parameters(), lr=self.hparams.lr)

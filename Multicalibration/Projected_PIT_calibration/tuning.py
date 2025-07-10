@@ -1,127 +1,90 @@
 from moc.configs.config import get_config
 from moc.utils.run_config import RunConfig
+# from moc.models.mqf2.lightning_module import MQF2LightningModule
 from moc.models.mixture.mixture_model2 import MixtureLightningModule
+from moc.models.gaussian.gaussian import GaussianLightningModule
 from moc.models.trainers.lightning_trainer import get_lightning_trainer
 from moc.datamodules.real_datamodule import RealDataModule
-from moc.metrics.distribution_metrics import pce, multivariate_energy_score
 import numpy as np
+import pandas as pd
+from moc.metrics.distribution_metrics import pce, multivariate_energy_score
 import torch
-import optuna
-from functools import partial
 import wandb
-import os
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "6"
+# wandb.login(key="9d338bfb8d6dd9ab97384ee89b11f332ae3e12b8") #ELNURA'S KEY
 
-def objective(trial, config, data_group, data_name, seed, prerank):
-    lambda_reg = trial.suggest_float("lambda_reg", 1e-3, 10.0, log=True)
-
-    rc = RunConfig(config, data_group, data_name, seed=seed)
-    datamodule = RealDataModule(rc, seed=seed, num_workers=8)
-    p, q = datamodule.input_dim, datamodule.output_dim
-
-    model = MixtureLightningModule(
-        p, q,
-        lambda_reg=lambda_reg,
-        reg_type='pce-kde',
-        prerank=prerank,
-    )
-
-    trainer = get_lightning_trainer(rc)
-    trainer.fit(model, datamodule)
-
-    model.to(config.device)
-    model.eval()
-
-    pces, nlls = [], []
-    if prerank == 'pca':
-        weights = []
-
-    with torch.no_grad():
-        for x, y in datamodule.val_dataloader():
-            x = x.to(config.device)
-            y = y.to(config.device)
-            dist = model.predict(x)
-            # pce_values, w = pce(dist, y, n_samples=100, prerank=prerank, setup='real')
-            if prerank == 'pca':
-                pce_values, weight = pce(dist, y, n_samples=100, prerank=prerank, setup='real')
-                weights.append(weight)
-            else: pce_values = pce(dist, y, n_samples=100, prerank=prerank, setup='real')
-            # NLL
-            nll = -dist.log_prob(y).mean().item()
-            nlls.append(nll)
-            pces.append(pce_values)
-
-    pce_total = torch.stack(pces).mean(dim=0)
-    nll_mean = np.mean(nlls)
-    if prerank =='pca':
-        weights_total = torch.stack(weights).mean(dim=0)
-        pce_total = torch.sum(pce_total * weights_total)
-    elif prerank == 'marginal':
-        pce_total = pce_total.mean()
-    
-    # Log metrics to W&B
-    wandb.log({
-        "lambda_reg": lambda_reg,
-        "pce": pce_total.item(),
-        "nll": nll_mean,
-    })
-
-
-    # Log both to the trial
-    trial.set_user_attr("nll", nll_mean)
-    # trial.set_user_attr("energy", energy_total.item())
-    return pce_total.item()
+torch.set_printoptions(precision=3, sci_mode=False, threshold=float('inf'), edgeitems=40, linewidth=200)
 
 config = get_config()
 config.device = 'cuda'
-dataset_names = [
-                #  ['camehl', 'households'], 
-                #  ['cevid', 'air'], ['cevid', 'births1'],
-                #  ['cevid', 'births2'], ['cevid', 'wage'], ['mulan', 'scm20d'],
-                #  ['mulan', 'rf2'], ['mulan', 'rf1'], ['mulan', 'scm1d'],
-                #  ['mulan', 'atp1d'], ['mulan', 'atp7d'], ['mulan', 'oes97'],
-                #  ['mulan', 'oes10'], ['mulan', 'jura'], ['mulan', 'sf1'],
-                #  ['mulan', 'sf2'], ['mulan', 'wq'], ['mulan', 'enb'],
-                #  ['mulan', 'slump'], 
-                 ['mulan', 'osales'], 
-                #  ['mulan', 'scpf'], 
-                #  ['feldman', 'meps_21'], ['feldman', 'meps_19'], ['feldman', 'meps_20'], 
-                #  ['feldman', 'house'], ['feldman', 'bio'], ['feldman', 'blog_data'], 
-                #  ['del_barrio', 'calcofi'], ['del_barrio', 'ansur2'], ['wang', 'taxi'], 
-                #  ['wang', 'energy'],
-                 ]
-data_group, data_name = ['mulan', 'oes10']
-seed = 42
-prerank = 'dependency'
+data_group, data_name = 'mulan', 'sf2'
+hparams = {
+    'model': 'mixture',
+    'prerank': 'density',
+    'lambda': 0.0,
+} #hparams is useful for the chekcpoint files to have useful names
+rc = RunConfig(config, data_group, data_name, hparams = hparams)
+datamodule = RealDataModule(rc, num_workers=8)
+p, q = datamodule.input_dim, datamodule.output_dim #268,16
 
-wandb_run = wandb.init(
-    project="multicalibration-hparam-tuning",
-    name=f"{data_name}_{prerank}",
-    config={"search_space": {"lambda_reg": [1e-4, 10.0]}}
-)
+preranks = ['marginal', 'mean', 'variance', 'dependency', 'pca', 'density']
+# preranks = ['cdf']
+lambdas = [0.0, 0.01, 0.1, 1.0, 5.0, 10.0]
 
-wrapped_objective = partial(objective, config=config, data_group=data_group, 
-                            data_name=data_name, seed=seed, prerank=prerank)
+results = []
 
+for prerank in preranks:
+    for l in lambdas:
+        print(f"working on prerank {prerank} and lambda {l}")
+        rc.hparams['lambda'] = l
+        rc.hparams["prerank"] = prerank
 
-study = optuna.create_study(direction="minimize")
-study.optimize(wrapped_objective, n_trials=40)  # no more callbacks here
+        model = MixtureLightningModule(p, q, lambda_reg=l, reg_type='pce-kde', prerank=prerank)
+        trainer = get_lightning_trainer(rc)
+        trainer.fit(model, datamodule)
 
-wandb_run.finish()
+        ckpt_path = trainer.checkpoint_callback.best_model_path
+        best_model = MixtureLightningModule.load_from_checkpoint(ckpt_path)
+        best_model.eval().to(config.device)
 
-# Post-processing : selection of best compromise PCE + constraint on NLL
-all_trials = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
+        val_loader = datamodule.val_dataloader()
+        all_pce, all_energy = [], []
 
-# Find minimal NLL
-max_nll, min_nll = max(t.user_attrs["nll"] for t in all_trials), min(t.user_attrs["nll"] for t in all_trials)
-nll_threshold = min_nll + 0.5 * (max_nll - min_nll)
+        for x, y in val_loader:
+            x = x.to(config.device)
+            y = y.to(config.device)
+            dist = best_model.predict(x)
+            print(best_model.hparams.prerank)
+            print(best_model.hparams.es_num_samples)
+            pce_val, _ = pce(dist, y, n_samples=best_model.hparams.es_num_samples, prerank=best_model.hparams.prerank)
+            energy_val = multivariate_energy_score(dist, y, n_samples=best_model.hparams.es_num_samples).mean()
+            all_pce.append(pce_val.mean().item())
+            all_energy.append(energy_val.item())
 
-admissible_trials = [t for t in all_trials if t.user_attrs["nll"] <= nll_threshold]
+        avg_pce = np.mean(all_pce)
+        avg_energy = np.mean(all_energy)
 
-best_trial = min(admissible_trials, key=lambda t: t.value)
+        results.append({
+            "lambda": l,
+            "prerank": prerank,
+            "pce": avg_pce,
+            "energy": avg_energy
+        })
 
-print("Best lambda_reg (under constraint):", best_trial.params["lambda_reg"])
-print("Best PCE (under constraint):", best_trial.value)
-print("Corresponding NLL:", best_trial.user_attrs["nll"])
+       # wandb.finish()
+df = pd.DataFrame(results)
 
+best_lambdas = {}
+
+for prerank in preranks:
+    subdf = df[df['prerank'] == prerank]
+    print(subdf)
+    if 0.0 not in subdf['lambda'].values:
+        continue
+    baseline_energy = subdf[subdf['lambda'] == 0.0]['energy'].values[0]
+    valid = subdf[subdf['energy'] <= 1.1 * baseline_energy]
+    best = valid.sort_values('pce').iloc[0] if not valid.empty else subdf.sort_values('pce').iloc[0]
+    best_lambdas[prerank] = best['lambda']
+    
+for k, v in best_lambdas.items():
+    print(f"{k}: best_lambda = {v}")
