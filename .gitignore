@@ -37,3 +37,4 @@ logs/
 *.yaml
 
 wandb/
+lightning_logs/

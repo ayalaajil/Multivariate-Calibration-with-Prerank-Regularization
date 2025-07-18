@@ -35,6 +35,8 @@ def rho_dep(z, h=1):
         rho_dep: tensor of dependency pre-rank values of shape either (B,) or (B, N)
     """
     d = z.shape[-1]
+    if d < 3:
+        return (z[..., 0] - z[..., 1])**2
     if h >= d:
         raise ValueError("Lag h must be less than dimension d")
 
@@ -46,5 +48,5 @@ def rho_dep(z, h=1):
 
     # Variance denominator
     var = torch.var(z, dim=-1, unbiased=False)
-
+    # print(f" dep is {- compute_gamma(z) / var}")
     return - compute_gamma(z) / var

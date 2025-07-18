@@ -55,10 +55,10 @@ class ScaledDataset(Dataset):
         return scaled.reshape(shape)
 
     def __getitem__(self, idx):
-        x, y = self.dataset[idx]
+        x, y, original_idx = self.dataset[idx]
         x = self.scale(x, self.scaler_x)
         y = self.scale(y, self.scaler_y)
-        return x, y
+        return x, y, original_idx
 
 
 
@@ -91,24 +91,27 @@ class BaseDataModule(LightningDataModule):
         N = x.shape[0]
         rng = np.random.RandomState(self.hparams.seed)
         train_ratio = self.train_val_calib_test_split_ratio[0]
-        sample_idx = rng.choice(N, min(N, math.ceil(max_size / train_ratio)), replace=False)
-        return x[sample_idx], y[sample_idx]
+        sample_idx = rng.choice(N, min(N, math.ceil(max_size / train_ratio)), replace=False) #ensures that after train/test splitting, total dataset size won't exceed max_size
+        return x[sample_idx], y[sample_idx], sample_idx
 
     def load_datasets(self):
         x, y = self.get_data() #gets data from camehl etc.
+        #These are the indexes of outliers that had very high NLL
+        # if self.dataset == 'rf1':
+        #     i_outlier = [4746, 4728, 4733, 4662]
+        #     mask = np.ones(len(x), dtype=bool)
+        #     mask[i_outlier] = False
+        #     x = x[mask]
+        #     y = y[mask]
         x = torch.from_numpy(x).to(torch.float32)
         y = torch.from_numpy(y).to(torch.float32)
-        max_size = 2000000
-        if self.rc.config.fast:
-            max_size = 1000
-        x, y = self.subsample(x, y, max_size=max_size)
-        if self.dataset == 'sf2':
-            max_val = y.max()
-            print(max_val)
-            mask1 = torch.all(torch.abs(y) < max_val, dim=1)
-            x = x[mask1]
-            y = y[mask1]
-        tensor_data = TensorDataset(x, y)
+        # max_size = 2000000
+        # if self.rc.config.fast:
+        #     max_size = 1000
+        # x, y, sample_idx = self.subsample(x, y, max_size=max_size)
+
+        indices = torch.arange(len(x))
+        tensor_data = TensorDataset(x, y, indices)
         self.total_size = len(tensor_data)
 
         # Convert ratios to number of elements in the dataset
@@ -131,7 +134,7 @@ class BaseDataModule(LightningDataModule):
             generator=torch.Generator().manual_seed(self.hparams.seed),
         )
 
-        x, y = self.data_train[:]
+        x, y, _ = self.data_train[:]
         self.scaler_x = StandardScaler().fit(x)
         self.scaler_y = StandardScaler().fit(y)
 
@@ -143,7 +146,7 @@ class BaseDataModule(LightningDataModule):
             self.data_test = self.make_scaled_dataset(self.data_test)
 
         # Make the size of the inputs accessible to the models
-        first_x, first_y = self.data_train[0]
+        first_x, first_y, _ = self.data_train[0]
         self.input_dim = first_x.shape[0]
         self.output_dim = first_y.shape[0]
 

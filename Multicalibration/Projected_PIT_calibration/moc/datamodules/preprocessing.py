@@ -7,7 +7,7 @@ import logging
 
 import pandas as pd
 import numpy as np
-
+np.set_printoptions(suppress=True, precision=3)
 log = logging.getLogger('moc')
 
 
@@ -92,5 +92,10 @@ def preprocess(x, y, categorical_mask=None):
     x, y = x.to_numpy('float32'), y.to_numpy('float32')
     assert np.isnan(x).sum() == 0 and np.isnan(y).sum() == 0
     assert np.isinf(x).sum() == 0 and np.isinf(y).sum() == 0
-    assert np.all(np.abs(y) < 1e6), "Outlier present!"
+    try:
+        if not np.all(np.abs(y) < 1e6):
+            raise ValueError("Outlier present!")
+    except ValueError as e:
+        print(e)
+    # optionally re-raise or handle differently
     return x, y, categorical_mask

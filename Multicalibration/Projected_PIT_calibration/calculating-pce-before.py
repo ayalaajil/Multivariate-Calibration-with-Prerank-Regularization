@@ -1,93 +1,96 @@
+import os
+os.environ["CUDA_VISIBLE_DEVICES"] = "2"
 from moc.configs.config import get_config
 from moc.utils.run_config import RunConfig
-# from moc.models.mqf2.lightning_module import MQF2LightningModule
 from moc.models.mixture.mixture_model2 import MixtureLightningModule
-from moc.models.gaussian.gaussian import GaussianLightningModule
 from moc.models.trainers.lightning_trainer import get_lightning_trainer
 from moc.datamodules.real_datamodule import RealDataModule
+from moc.metrics.distribution_metrics import pce, multivariate_energy_score
 import numpy as np
-import matplotlib.pyplot as plt
-from moc.metrics.distribution_metrics import pce
+import pandas as pd
 import torch
-import pickle
-import wandb
 
-plt.style.use('seaborn-v0_8')
-plt.rcParams.update({
-    'axes.titlesize': 12,
-    'axes.labelsize': 12,
-    'xtick.labelsize': 12,
-    'ytick.labelsize': 12,
-    'legend.fontsize': 12
-})
+torch.set_printoptions(precision=3, sci_mode=False, threshold=float('inf'), edgeitems=40, linewidth=200)
 
-def run_prerank_eval(prerank, data_group='mulan', data_name='sf2'):
-    config = get_config()
-    config.device = 'cuda'
-    torch.manual_seed(42)
+datasets = [['camehl', 'households'], ['cevid', 'air'], ['cevid', 'births1'],
+            ['cevid', 'births2'], ['cevid', 'wage'], ['mulan', 'scm20d'],
+            ['mulan', 'rf2'], ['mulan', 'rf1'], ['mulan', 'scm1d'], ['mulan', 'sf2'],
+            ['mulan', 'wq'], ['mulan', 'scpf'], ['feldman', 'meps_21'], ['feldman', 'meps_19'],
+            ['feldman', 'meps_20'], ['feldman', 'house'], ['feldman', 'bio'], ['feldman', 'blog_data'],
+            ['del_barrio', 'calcofi'], ['del_barrio', 'ansur2'], ['wang', 'taxi']]
 
-    seeds = [0, 42, 866, 12, 4]
-    pce_over_seeds, cdf_over_seeds = [], []
+config = get_config()
+config.device = 'cuda'
 
+preranks = ['marginal', 'mean', 'variance', 'dependency', 'pca', 'density', 'cdf']
+seeds = [0, 42, 866, 12, 4]
+
+results_path = "metrics-before-reg.csv"
+if os.path.exists(results_path):
+    df = pd.read_csv(results_path)
+else:
+    df = pd.DataFrame(columns=["data_name", "seed", "prerank", "pce", "nll", "energy"])
+
+for data_group, data_name in datasets:
     for seed in seeds:
-        print(f"Dataset: {data_group} {data_name} | Prerank: {prerank} | Seed: {seed}")
-        rc = RunConfig(config, data_group, data_name, seed=seed)
-        datamodule = RealDataModule(rc, seed=seed, num_workers=8)
+        trained = (
+            (df['seed'] == seed) &
+            (df['data_name'] == data_name)
+        ).any()
+
+        if trained:
+            print(f"Skipping: {data_group}/{data_name} | seed={seed}")
+            continue
+
+        print(f"Training: {data_group}/{data_name} | seed={seed}")
+        hparams = {
+            'model': 'mixture',
+            'seed': seed,
+            'lambda': 0.0,
+            'prerank': 'none'
+        }
+
+        rc = RunConfig(config, data_group, data_name, hparams=hparams, seed = seed)
+        datamodule = RealDataModule(rc, num_workers=8, seed = seed)
         p, q = datamodule.input_dim, datamodule.output_dim
         model = MixtureLightningModule(p, q)
         trainer = get_lightning_trainer(rc)
-        trainer.fit(model, datamodule)
 
-        model.to(config.device)
-        model.eval()
-        pces, cdfs = [], []
-        if prerank == 'pca':
-            weights = []
+        try:
+            trainer.fit(model, datamodule) #train with one seed and one dataset
+            ckpt_path = trainer.checkpoint_callback.best_model_path
+            best_model = MixtureLightningModule.load_from_checkpoint(ckpt_path)
+            best_model.eval().to(config.device)
+            test_loader = datamodule.test_dataloader()
 
-        with torch.no_grad():
-            for x, y in datamodule.val_dataloader():
-                x = x.to(config.device)
-                y = y.to(config.device)
-                dist = model.predict(x)
-                pce_values, cdf_values, extra = pce(dist, y, n_samples=100, prerank=prerank, setup='real', mode='test')
-                pces.append(pce_values)
-                cdfs.append(cdf_values)
-                if prerank == 'pca':
-                    explained_var = torch.from_numpy(extra).to(pce_values.device)
-                    weights.append(explained_var)
+            for prerank in preranks:
+                pces, nlls, energies = [], [], []
 
-        pce_total = torch.stack(pces).mean(dim=0)
-        cdfs_total = torch.stack(cdfs).mean(dim=0)
+                for x, y in test_loader:
+                    x = x.to(config.device)
+                    y = y.to(config.device)
+                    dist = best_model.predict(x)
+                    pce_val, _ = pce(dist, y, n_samples=best_model.hparams.es_num_samples, prerank=prerank)
+                    energy_val = multivariate_energy_score(dist, y, n_samples=best_model.hparams.es_num_samples).mean() #will be the same for all preranks
+                    nll_value = -dist.log_prob(y).mean() #will be the same for all preranks since it doesn't depend on prerank at all
+                    pces.append(pce_val.mean().item())
+                    nlls.append(nll_value.item())
+                    energies.append(energy_val.item())
 
-        if prerank == 'pca':
-            weights_total = torch.stack(weights).mean(dim=0)
-            pce_total = torch.sum(pce_total * weights_total)
-            cdfs_total = cdfs_total.mean(dim=0)
-        elif prerank == 'marginal':
-            pce_total = pce_total.mean(dim=0)
-            cdfs_total = cdfs_total.mean(dim=0)
+                avg_pce = np.mean(pces)
+                avg_nll = np.mean(nlls)
+                avg_energy = np.mean(energies)
 
-        pce_over_seeds.append(pce_total.cpu().numpy())
-        cdf_over_seeds.append(cdfs_total.cpu().numpy())
+                df = pd.concat([df, pd.DataFrame([{
+                    "data_name": data_name,
+                    "seed": seed,
+                    "prerank": prerank,
+                    "pce": avg_pce,
+                    "nll": avg_nll,
+                    "energy": avg_energy
+                }])], ignore_index=True)
 
-    pce_over_seeds = np.stack(pce_over_seeds)
-    cdf_over_seeds = np.stack(cdf_over_seeds)
-
-    print(f"[{prerank}] Mean PCE: {pce_over_seeds.mean():.4f}")
-    print(f"[{prerank}] Std Error: {pce_over_seeds.std() / np.sqrt(len(seeds)):.4f}")
-
-    alphas = np.linspace(0, 1, 100)
-    plt.figure(figsize=(6, 4))
-    for s in range(len(seeds)):
-        cdf = cdf_over_seeds[s][0] if prerank not in ['pca', 'marginal'] else cdf_over_seeds[s]
-        plt.plot(alphas, cdf, color='royalblue', lw=1.5, alpha=0.8)
-    plt.plot(alphas, alphas, linestyle='--', color='black')
-    plt.xlabel(r"$\alpha$")
-    plt.ylabel(r"$\hat{F}_Z(\alpha)$")
-    plt.grid(True)
-    plt.tight_layout()
-    plt.savefig(f"figures/rel_plot_{prerank}_{data_name}.png", dpi=300)
-    plt.show()
-
-for prerank in ['marginal', 'mean', 'variance', 'dependency', 'pca', 'density']:
-    run_prerank_eval(prerank)
+                df.to_csv(results_path, index=False)
+        except Exception as e:
+            print(f"Failed: {data_group}/{data_name} | seed={seed} | {e}")
+            continue

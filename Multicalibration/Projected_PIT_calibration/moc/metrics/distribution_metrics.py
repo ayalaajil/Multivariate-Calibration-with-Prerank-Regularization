@@ -33,6 +33,14 @@ def sample(dist, n_samples):
         samples = (weights.unsqueeze(-1) * component_samples).sum(dim=2)  # [B, n_samples, D]
     return samples
 
+def mse(dist, y):
+    means = dist.component_distribution.loc # (B, K, D) 256, 5, 4
+    weights = dist.mixture_distribution.probs #(B, K)
+    mixture_mean = torch.sum(weights.unsqueeze(-1) * means, dim=1) #B, D (e.g. 256,4)
+    # samples = dist.sample((n_samples,)).permute(1, 0, 2)  # [B, n_samples, D]
+    mse = ((mixture_mean - y)**2).mean()
+    return mse
+
 
 def multivariate_energy_score(dist, y, n_samples = 100):
 

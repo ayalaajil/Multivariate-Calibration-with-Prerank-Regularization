@@ -103,8 +103,9 @@ def pce_kde_regularization(dist, y, prerank, n_samples = 100, M = 100, tau = 100
         # Compute phi_kde for all alphas at once
         phi_kde = torch.sigmoid(tau * (alphas_exp - pit_exp)).mean(dim=0)  # (100,)
         pce_kde =  torch.abs(alphas - phi_kde).pow(p).mean()
+        
         pce_kdes.append(pce_kde)
-    pce_kdes = torch.stack(pce_kdes)  # (4, 100)
+    pce_kdes = torch.stack(pce_kdes) #shape (d)
     if prerank == 'pca':
         explained_var = torch.from_numpy(_).to(pce_kdes.device)
         return (pce_kdes * explained_var).sum()

@@ -122,7 +122,6 @@ class MixtureLightningModule(LightningModule):
         self.val_cdfs = []
         self.total_train_cdfs = []
         self.total_val_cdfs = []
-        self.regularization_active = False
 
     def forward(self, x):
         out = self.model(x) #(batch_size, 75)
@@ -140,11 +139,14 @@ class MixtureLightningModule(LightningModule):
     def compute_loss(self, dist, y):
 
         reg_val = torch.zeros(1).to(y.device)
-        if self.regularization_active:
-            if self.hparams.reg_type == 'truncation':
-                reg_val = truncation_regularization(dist, y)
-            elif self.hparams.reg_type == 'pce-kde':
-                reg_val = pce_kde_regularization(dist, y, n_samples = self.hparams.es_num_samples, prerank = self.hparams.prerank)
+        marg_val = torch.zeros(1).to(y.device)
+        prerank_val = torch.zeros(1).to(y.device)
+        
+        if self.hparams.reg_type == 'truncation':
+            reg_val = truncation_regularization(dist, y)
+        elif self.hparams.reg_type == 'pce-kde':
+            marg_val = pce_kde_regularization(dist, y, n_samples = self.hparams.es_num_samples, prerank = 'marginal')
+            prerank_val = pce_kde_regularization(dist, y, n_samples = self.hparams.es_num_samples, prerank = self.hparams.prerank)
 
         if self.hparams.loss == 'nll':
             loss_term = -dist.log_prob(y).mean()
@@ -153,46 +155,47 @@ class MixtureLightningModule(LightningModule):
         else:
             raise ValueError(f'Invalid loss: {self.hparams.loss}')
         
-        reg_term = self.hparams.lambda_reg * reg_val
+        reg_term = self.hparams.lambda_reg * (marg_val + prerank_val)
         total_loss = loss_term + reg_term
 
-        return total_loss, loss_term, reg_val
+        return total_loss, loss_term, marg_val, prerank_val
 
     def step(self, batch):
-        x, y = batch
+        x, y, idx = batch
         dist = self(x)
 
-        total_loss, loss_term, raw_reg = self.compute_loss(dist, y)
+        total_loss, loss_term, marg_val, prerank_val = self.compute_loss(dist, y)
 
-        pce_val, cdfs = pce(dist, y, n_samples=self.hparams.es_num_samples, prerank=self.hparams.prerank)
-        energy_score = multivariate_energy_score(dist, y, n_samples=self.hparams.es_num_samples).mean()
+        # pce_val, cdfs = pce(dist, y, n_samples=self.hparams.es_num_samples, prerank=self.hparams.prerank)
+        # energy_score = multivariate_energy_score(dist, y, n_samples=self.hparams.es_num_samples).mean()
 
-        return total_loss, loss_term, raw_reg, pce_val, cdfs, energy_score
-
-    def on_train_epoch_start(self):
-        self.regularization_active = self.current_epoch >= self.warmup_epochs
+        return total_loss, loss_term, marg_val, prerank_val
+    # pce_val, cdfs, energy_score
 
     def training_step(self, batch, batch_idx):
-        total_loss, loss_term, raw_reg, pce_val, cdfs, energy_score = self.step(batch)
+        total_loss, loss_term, marg_val, prerank_val = self.step(batch)
+        # pce_val, cdfs, energy_score 
         if self.global_step == 0:
-            print(f"Checking {raw_reg.requires_grad}, {raw_reg.grad_fn}")
+            print(f"Checking {marg_val.requires_grad}, {prerank_val.requires_grad}")
 
         self.log('train/total_loss', total_loss, on_step=False, on_epoch=True, prog_bar=False)
         self.log('train/nll', loss_term, on_step=False, on_epoch=True, prog_bar=False)
-        self.log('train/raw_reg', raw_reg, on_step=False, on_epoch=True, prog_bar=False)
+        self.log('train/marg_val', marg_val, on_step=False, on_epoch=True, prog_bar=False)
+        self.log('train/prerank_val', prerank_val, on_step=False, on_epoch=True, prog_bar=False)
         # self.log('train/pce_val', pce_val, on_step=False, on_epoch=True, prog_bar=False)
         # self.train_cdfs.append(cdfs)
 
         return total_loss 
 
     def validation_step(self, batch, batch_idx):
-        total_loss, loss_term, raw_reg, pce_val, cdfs, energy_score = self.step(batch)
+        total_loss, loss_term, marg_val, prerank_val = self.step(batch)
+        # pce_val, cdfs, energy_score = self.step(batch)
 
         # self.log('val/total_loss', total_loss, on_step=False, on_epoch=True, prog_bar=False)
         self.log('val/nll', loss_term, on_step=False, on_epoch=True, prog_bar=False)
         # self.log('val/raw_reg', raw_reg, on_step=False, on_epoch=True, prog_bar=False)
-        self.log('val/pce_val', pce_val.mean(), on_step=False, on_epoch=True, prog_bar=False)
-        self.log('val/energy_score', energy_score, on_step=False, on_epoch=True, prog_bar=False)
+        # self.log('val/pce_val', pce_val.mean(), on_step=False, on_epoch=True, prog_bar=False)
+        # self.log('val/energy_score', energy_score, on_step=False, on_epoch=True, prog_bar=False)
         #add the energy score here
         # self.val_cdfs.append(cdfs)
 
