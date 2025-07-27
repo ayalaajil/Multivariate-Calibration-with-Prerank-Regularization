@@ -76,6 +76,6 @@ def get_lightning_trainer(rc):
         enable_model_summary=False,
         enable_progress_bar=False,
         callbacks=callbacks,
-        logger=wandb_logger,
+        # logger=wandb_logger,
         # deterministic = True,
     )

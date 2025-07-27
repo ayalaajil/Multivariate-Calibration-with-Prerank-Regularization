@@ -97,12 +97,12 @@ class BaseDataModule(LightningDataModule):
     def load_datasets(self):
         x, y = self.get_data() #gets data from camehl etc.
         #These are the indexes of outliers that had very high NLL
-        # if self.dataset == 'rf1':
-        #     i_outlier = [4746, 4728, 4733, 4662]
-        #     mask = np.ones(len(x), dtype=bool)
-        #     mask[i_outlier] = False
-        #     x = x[mask]
-        #     y = y[mask]
+        if self.dataset == 'rf1' or self.dataset == 'rf2':
+            i_outlier = [4710, 4734]
+            mask = np.ones(len(x), dtype=bool)
+            mask[i_outlier] = False
+            x = x[mask]
+            y = y[mask]
         x = torch.from_numpy(x).to(torch.float32)
         y = torch.from_numpy(y).to(torch.float32)
         # max_size = 2000000

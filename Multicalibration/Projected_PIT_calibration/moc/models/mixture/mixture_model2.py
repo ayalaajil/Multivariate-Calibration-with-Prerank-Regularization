@@ -97,15 +97,16 @@ class MixtureLightningModule(LightningModule):
         lambda_reg: float = 0.0,
         reg_type: str = 'none',
         prerank: str = 'none',
-        warmup_epochs: int = 0,
+        double_reg = False,
+        double_reg_type: str = 'marginal',
     ):
         super().__init__()
         self.save_hyperparameters()
-        
+        self.double_reg = double_reg
+        self.double_reg_type = double_reg_type
         mixture_size = self.hparams.mixture_size
         self.lambda_reg = lambda_reg
         self.reg_type = reg_type
-        self.warmup_epochs = warmup_epochs
         self.output_shape = (
             mixture_size,
             mixture_size * output_dim,
@@ -145,7 +146,11 @@ class MixtureLightningModule(LightningModule):
         if self.hparams.reg_type == 'truncation':
             reg_val = truncation_regularization(dist, y)
         elif self.hparams.reg_type == 'pce-kde':
-            marg_val = pce_kde_regularization(dist, y, n_samples = self.hparams.es_num_samples, prerank = 'marginal')
+            if self.double_reg:
+                if self.double_reg_type == 'marginal':
+                    marg_val = pce_kde_regularization(dist, y, n_samples = self.hparams.es_num_samples, prerank = 'marginal')
+                elif self.double_reg_type == 'pca':
+                    marg_val = pce_kde_regularization(dist, y, n_samples = self.hparams.es_num_samples, prerank = 'pca')
             prerank_val = pce_kde_regularization(dist, y, n_samples = self.hparams.es_num_samples, prerank = self.hparams.prerank)
 
         if self.hparams.loss == 'nll':
