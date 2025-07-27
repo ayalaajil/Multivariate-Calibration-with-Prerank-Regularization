@@ -149,6 +149,7 @@ class MixtureLightningModule(LightningModule):
             prerank_val = pce_kde_regularization(dist, y, n_samples = self.hparams.es_num_samples, prerank = self.hparams.prerank)
 
         if self.hparams.loss == 'nll':
+            loss_per_sample = -dist.log_prob(y)
             loss_term = -dist.log_prob(y).mean()
         elif self.hparams.loss == 'es':
             loss_term = multivariate_energy_score(dist, y, n_samples=self.hparams.es_num_samples).mean()
@@ -158,22 +159,22 @@ class MixtureLightningModule(LightningModule):
         reg_term = self.hparams.lambda_reg * (marg_val + prerank_val)
         total_loss = loss_term + reg_term
 
-        return total_loss, loss_term, marg_val, prerank_val
+        return total_loss, loss_term, marg_val, prerank_val, loss_per_sample
 
     def step(self, batch):
         x, y, idx = batch
         dist = self(x)
 
-        total_loss, loss_term, marg_val, prerank_val = self.compute_loss(dist, y)
+        total_loss, loss_term, marg_val, prerank_val, loss_per_sample = self.compute_loss(dist, y)
 
         # pce_val, cdfs = pce(dist, y, n_samples=self.hparams.es_num_samples, prerank=self.hparams.prerank)
         # energy_score = multivariate_energy_score(dist, y, n_samples=self.hparams.es_num_samples).mean()
 
-        return total_loss, loss_term, marg_val, prerank_val
+        return total_loss, loss_term, marg_val, prerank_val, loss_per_sample
     # pce_val, cdfs, energy_score
 
     def training_step(self, batch, batch_idx):
-        total_loss, loss_term, marg_val, prerank_val = self.step(batch)
+        total_loss, loss_term, marg_val, prerank_val,loss_per_sample  = self.step(batch)
         # pce_val, cdfs, energy_score 
         if self.global_step == 0:
             print(f"Checking {marg_val.requires_grad}, {prerank_val.requires_grad}")
@@ -188,7 +189,16 @@ class MixtureLightningModule(LightningModule):
         return total_loss 
 
     def validation_step(self, batch, batch_idx):
-        total_loss, loss_term, marg_val, prerank_val = self.step(batch)
+        x, y, idx = batch
+        total_loss, loss_term, marg_val, prerank_val,loss_per_sample  = self.step(batch)
+        '''print("BATCH IDX")
+        print(batch_idx)
+        print("LOSS")
+        print(total_loss)'''
+        '''if batch_idx== 3:
+            print("== BATCH IDX 2 ==")
+            for i, (index, loss_val) in enumerate(zip(idx, loss_per_sample)):
+                print(f"Sample index in dataset: {index.item()} | Loss: {loss_val.item()}")'''
         # pce_val, cdfs, energy_score = self.step(batch)
 
         # self.log('val/total_loss', total_loss, on_step=False, on_epoch=True, prog_bar=False)
@@ -200,6 +210,23 @@ class MixtureLightningModule(LightningModule):
         # self.val_cdfs.append(cdfs)
 
         return total_loss
+    
+    '''def test_step(self, batch, batch_idx):
+        x, y, idx = batch
+        total_loss, loss_term, marg_val, prerank_val, loss_per_sample = self.step(batch)
+
+        print("BATCH IDX")
+        print(batch_idx)
+        print("LOSS")
+        print(total_loss)
+
+        self.log('test/total_loss', total_loss, on_step=False, on_epoch=True, prog_bar=False)
+        self.log('test/nll', loss_term, on_step=False, on_epoch=True, prog_bar=False)
+        self.log('test/marg_val', marg_val, on_step=False, on_epoch=True, prog_bar=False)
+        self.log('test/prerank_val', prerank_val, on_step=False, on_epoch=True, prog_bar=False)
+        # self.log('test/energy_score', energy_score, on_step=False, on_epoch=True, prog_bar=False)
+
+        return total_loss'''
 
     # def on_train_epoch_end(self):
     #     train_cdfs = torch.cat(self.train_cdfs, dim=0).mean(dim=0)

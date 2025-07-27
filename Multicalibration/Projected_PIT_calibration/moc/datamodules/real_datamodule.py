@@ -154,4 +154,5 @@ def get_data(data_dir, group, name):
 
 class RealDataModule(BaseDataModule):
     def get_data(self):
-        return get_data(self.rc.config.data_dir, self.dataset_group, self.dataset)
+        x, y = get_data(self.rc.config.data_dir, self.dataset_group, self.dataset)
+        return x, y
