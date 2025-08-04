@@ -2,6 +2,8 @@ import logging
 import math
 from abc import abstractmethod
 from pathlib import Path
+import hashlib
+import os
 
 import numpy as np
 import torch
@@ -94,15 +96,72 @@ class BaseDataModule(LightningDataModule):
         sample_idx = rng.choice(N, min(N, math.ceil(max_size / train_ratio)), replace=False) #ensures that after train/test splitting, total dataset size won't exceed max_size
         return x[sample_idx], y[sample_idx], sample_idx
 
+    def hash_data(array):
+        return hashlib.md5(array.tobytes()).hexdigest()
+
     def load_datasets(self):
         x, y = self.get_data() #gets data from camehl etc.
         #These are the indexes of outliers that had very high NLL
+<<<<<<< HEAD
+        # if self.dataset == 'rf1':
+        #     i_outlier = [4746, 4728, 4733, 4662]
+        #     mask = np.ones(len(x), dtype=bool)
+        #     mask[i_outlier] = False
+        #     x = x[mask]
+        #     y = y[mask]
+
+        '''if self.dataset == 'rf1':
+             i_outlier = [4710, 4734]
+             mask = np.ones(len(x), dtype=bool)
+             mask[i_outlier] = False
+             x = x[mask]
+             y = y[mask]
+
+        if self.dataset == 'rf2':
+             i_outlier = [4710, 4734]
+             mask = np.ones(len(x), dtype=bool)
+             mask[i_outlier] = False
+             x = x[mask]
+             y = y[mask]'''
+        '''if self.dataset in ['rf1', 'rf2']:
+            i_outlier = [4710, 4734]
+            
+            # Sauvegarde des vrais outliers (avant suppression)
+            outliers = x[i_outlier]
+            outlier_path = f"{self.rc.config.data_dir}/outliers_x_{self.dataset}.npy"
+            np.save(outlier_path, outliers)
+            print(f"Saved {len(i_outlier)} manually flagged outliers to {outlier_path}")
+            
+            # Suppression
+            mask = np.ones(len(x), dtype=bool)
+            mask[i_outlier] = False
+            x = x[mask]
+            y = y[mask]'''
+
+        if self.dataset in ['rf1', 'rf2']:
+            outlier_path = f"{self.rc.config.data_dir}/outliers_x_{self.dataset}.npy"
+            if os.path.exists(outlier_path):
+                outliers = np.load(outlier_path)
+                print(f"Removing {len(outliers)} known outliers by content from {outlier_path}")
+                mask = np.ones(len(x), dtype=bool)
+                removed_points = []
+                for o in outliers:
+                    matches = np.all(x == o, axis=1)
+                    if matches.any():
+                        removed_points.append(x[matches])
+                    mask &= ~matches
+                print("HEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEERRRRRRRRRRRREEEEEEEEEEEEEE")
+                print(removed_points)
+                x = x[mask]
+                y = y[mask]
+=======
         if self.dataset == 'rf1' or self.dataset == 'rf2':
             i_outlier = [4710, 4734]
             mask = np.ones(len(x), dtype=bool)
             mask[i_outlier] = False
             x = x[mask]
             y = y[mask]
+>>>>>>> 31c692802940048fc9a19e0c69afb83687f35450
         x = torch.from_numpy(x).to(torch.float32)
         y = torch.from_numpy(y).to(torch.float32)
         # max_size = 2000000
