@@ -92,12 +92,12 @@ def calculate_PIT(dist, y, n_samples, prerank, tau = 100):
             pits.append(cdfs)
     elif prerank == 'pca':
         samples_np = samples.detach().cpu().numpy().reshape(-1, y.shape[1])
-        pca = PCA(n_components=0.8) #keeping all components, 4 in this case
+        pca = PCA(n_components=None) #keeping all components, 4 in this case
         pca.fit(samples_np)
         dim = pca.n_components_
         vectors = torch.tensor(pca.components_, dtype=samples.dtype, device = samples.device) #4 by 4
         explained_var = pca.explained_variance_ratio_ #array of len 4
-        print(f"number of components kept {dim}")
+        # print(f"number of components kept {dim}")
         for d in range(dim):
             u = vectors[d]
             sample_proj = torch.matmul(samples, u) # 256,100

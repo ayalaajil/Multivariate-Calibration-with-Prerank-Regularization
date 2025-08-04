@@ -13,8 +13,8 @@ import torch
 torch.set_printoptions(precision=3, sci_mode=False, threshold=float('inf'), edgeitems=40, linewidth=200)
 
 datasets = [
-            ['mulan', 'scm20d'],
-            ['mulan', 'scm1d']
+            ['camehl', 'households'], ['cevid', 'air'], 
+            ['cevid', 'births2'], ['mulan', 'wq'] 
             ]
 
 # tuning_all = pd.read_csv('tuning-results.csv')
