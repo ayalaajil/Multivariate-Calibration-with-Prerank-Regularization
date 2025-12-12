@@ -95,18 +95,16 @@ class MixtureLightningModule(LightningModule):
         es_num_samples: int = 100,
         lr=1e-4, #was 1e-4 BEFORE
         lambda_reg: float = 0.0,
-        reg_type: str = 'none',
-        prerank: str = 'none',
-        double_reg = False,
-        double_reg_type: str = 'marginal',
+        do_reg: bool = False,
+        prerank: list = [],
+        tau: int = 100
     ):
         super().__init__()
         self.save_hyperparameters()
-        self.double_reg = double_reg
-        self.double_reg_type = double_reg_type
         mixture_size = self.hparams.mixture_size
         self.lambda_reg = lambda_reg
-        self.reg_type = reg_type
+        self.do_reg = do_reg
+        # self.tau = tau
         self.output_shape = (
             mixture_size,
             mixture_size * output_dim,
@@ -139,109 +137,70 @@ class MixtureLightningModule(LightningModule):
 
     def compute_loss(self, dist, y):
 
-        reg_val = torch.zeros(1).to(y.device)
-        marg_val = torch.zeros(1).to(y.device)
-        prerank_val = torch.zeros(1).to(y.device)
-        
-        if self.hparams.reg_type == 'truncation':
-            reg_val = truncation_regularization(dist, y)
-        elif self.hparams.reg_type == 'pce-kde':
-            if self.double_reg:
-                if self.double_reg_type == 'marginal':
-                    marg_val = pce_kde_regularization(dist, y, n_samples = self.hparams.es_num_samples, prerank = 'marginal')
-                elif self.double_reg_type == 'pca':
-                    marg_val = pce_kde_regularization(dist, y, n_samples = self.hparams.es_num_samples, prerank = 'pca')
-            prerank_val = pce_kde_regularization(dist, y, n_samples = self.hparams.es_num_samples, prerank = self.hparams.prerank)
+        pces_list = []
+        total_pce = torch.zeros(1).to(y.device)
 
+        if self.do_reg:
+            if len(self.hparams.prerank)>1: #if there are two or more preranks
+                for rho in self.hparams.prerank:
+                    pce_value = pce_kde_regularization(dist, y, n_samples = self.hparams.es_num_samples, 
+                                                        prerank = rho, tau = self.hparams.tau)
+                    pces_list.append(pce_value)
+                total_pce = torch.stack(pces_list).sum()
+            else: 
+                pce = pce_kde_regularization(dist, y, n_samples = self.hparams.es_num_samples, 
+                                                    prerank = self.hparams.prerank[0], tau = self.hparams.tau)
+                pces_list = [pce]
+                total_pce = pce
+        
         if self.hparams.loss == 'nll':
-            loss_per_sample = -dist.log_prob(y)
             loss_term = -dist.log_prob(y).mean()
         elif self.hparams.loss == 'es':
-            loss_term = multivariate_energy_score(dist, y, n_samples=self.hparams.es_num_samples).mean()
+            loss_term = multivariate_energy_score(dist, y, n_samples=100).mean()
         else:
             raise ValueError(f'Invalid loss: {self.hparams.loss}')
         
-        reg_term = self.hparams.lambda_reg * (marg_val + prerank_val)
+        reg_term = self.hparams.lambda_reg * (total_pce)
         total_loss = loss_term + reg_term
 
-        return total_loss, loss_term, marg_val, prerank_val, loss_per_sample
+        return total_loss, loss_term, total_pce, pces_list
 
     def step(self, batch):
         x, y, idx = batch
         dist = self(x)
 
-        total_loss, loss_term, marg_val, prerank_val, loss_per_sample = self.compute_loss(dist, y)
+        total_loss, loss_term, total_pce, pces_list = self.compute_loss(dist, y)
 
-        # pce_val, cdfs = pce(dist, y, n_samples=self.hparams.es_num_samples, prerank=self.hparams.prerank)
-        # energy_score = multivariate_energy_score(dist, y, n_samples=self.hparams.es_num_samples).mean()
-
-        return total_loss, loss_term, marg_val, prerank_val, loss_per_sample
-    # pce_val, cdfs, energy_score
-
+        return total_loss, loss_term, total_pce, pces_list
+    
     def training_step(self, batch, batch_idx):
-        total_loss, loss_term, marg_val, prerank_val,loss_per_sample  = self.step(batch)
-        # pce_val, cdfs, energy_score 
+        total_loss, loss_term, total_pce, pces_list  = self.step(batch)
+        
         if self.global_step == 0:
-            print(f"Checking {marg_val.requires_grad}, {prerank_val.requires_grad}")
+            print(f"Checking {total_pce.requires_grad}")
 
         self.log('train/total_loss', total_loss, on_step=False, on_epoch=True, prog_bar=False)
         self.log('train/nll', loss_term, on_step=False, on_epoch=True, prog_bar=False)
-        self.log('train/marg_val', marg_val, on_step=False, on_epoch=True, prog_bar=False)
-        self.log('train/prerank_val', prerank_val, on_step=False, on_epoch=True, prog_bar=False)
-        # self.log('train/pce_val', pce_val, on_step=False, on_epoch=True, prog_bar=False)
-        # self.train_cdfs.append(cdfs)
+        self.log('train/total_pce', total_pce, on_step=False, on_epoch=True, prog_bar=False)
+        if self.do_reg:
+            for i in range(len(self.hparams.prerank)):
+                self.log(f'train/{self.hparams.prerank[i]}_pce', pces_list[i], on_step=False, on_epoch=True, prog_bar=False)
+        
 
         return total_loss 
 
     def validation_step(self, batch, batch_idx):
-        x, y, idx = batch
-        total_loss, loss_term, marg_val, prerank_val,loss_per_sample  = self.step(batch)
-        '''print("BATCH IDX")
-        print(batch_idx)
-        print("LOSS")
-        print(total_loss)'''
-        '''if batch_idx== 3:
-            print("== BATCH IDX 2 ==")
-            for i, (index, loss_val) in enumerate(zip(idx, loss_per_sample)):
-                print(f"Sample index in dataset: {index.item()} | Loss: {loss_val.item()}")'''
-        # pce_val, cdfs, energy_score = self.step(batch)
+        total_loss, loss_term, total_pce, pces_list = self.step(batch)
 
-        # self.log('val/total_loss', total_loss, on_step=False, on_epoch=True, prog_bar=False)
+        self.log('val/total_loss', total_loss, on_step=False, on_epoch=True, prog_bar=False)
         self.log('val/nll', loss_term, on_step=False, on_epoch=True, prog_bar=False)
-        # self.log('val/raw_reg', raw_reg, on_step=False, on_epoch=True, prog_bar=False)
-        # self.log('val/pce_val', pce_val.mean(), on_step=False, on_epoch=True, prog_bar=False)
-        # self.log('val/energy_score', energy_score, on_step=False, on_epoch=True, prog_bar=False)
-        #add the energy score here
-        # self.val_cdfs.append(cdfs)
+        self.log('val/total_pce', total_pce, on_step=False, on_epoch=True, prog_bar=False)
+        if self.do_reg:
+            for i in range(len(self.hparams.prerank)):
+                self.log(f'val/{self.hparams.prerank[i]}_pce', pces_list[i], on_step=False, on_epoch=True, prog_bar=False)
 
         return total_loss
-    
-    '''def test_step(self, batch, batch_idx):
-        x, y, idx = batch
-        total_loss, loss_term, marg_val, prerank_val, loss_per_sample = self.step(batch)
 
-        print("BATCH IDX")
-        print(batch_idx)
-        print("LOSS")
-        print(total_loss)
-
-        self.log('test/total_loss', total_loss, on_step=False, on_epoch=True, prog_bar=False)
-        self.log('test/nll', loss_term, on_step=False, on_epoch=True, prog_bar=False)
-        self.log('test/marg_val', marg_val, on_step=False, on_epoch=True, prog_bar=False)
-        self.log('test/prerank_val', prerank_val, on_step=False, on_epoch=True, prog_bar=False)
-        # self.log('test/energy_score', energy_score, on_step=False, on_epoch=True, prog_bar=False)
-
-        return total_loss'''
-
-    # def on_train_epoch_end(self):
-    #     train_cdfs = torch.cat(self.train_cdfs, dim=0).mean(dim=0)
-    #     self.total_train_cdfs.append(train_cdfs)
-    #     self.train_cdfs = []
-
-    # def on_validation_epoch_end(self):
-    #     val_cdfs = torch.cat(self.val_cdfs, dim=0).mean(dim=0)
-    #     self.total_val_cdfs.append(val_cdfs)
-    #     self.val_cdfs = []
 
     def configure_optimizers(self):
         return torch.optim.Adam(params=self.parameters(), lr=self.hparams.lr)

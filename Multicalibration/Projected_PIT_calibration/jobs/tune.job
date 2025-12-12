@@ -1,8 +1,0 @@
-#!/bin/bash
-#SBATCH --job-name=tune_density_prerank
-#SBATCH --output=slurm_density.out   
-#SBATCH --cpus-per-task=4
-#SBATCH --mem=8G
-#SBATCH --gres=gpu:1          
-
-python tuning.py

@@ -57,7 +57,7 @@ def multivariate_energy_score(dist, y, n_samples = 100):
     return (term1 - term2).mean()
 
 def empirical_cdf(dist, x, n_samples=100, tau = 100) -> torch.Tensor:
-    """
+    r"""
     Args:
         x: (batch_size, d) 256, 3
     Returns:
@@ -65,6 +65,7 @@ def empirical_cdf(dist, x, n_samples=100, tau = 100) -> torch.Tensor:
     """
 
     samples = sample(dist, n_samples) #256, 100, 3
+    # samples = dist.sample((n_samples,)).permute(1, 0, 2) # 256, 100, 3
     x = x.unsqueeze(1) # 256, 1, 3
     # comparison = samples <= values # (batch_size, n_samples, d)
     # tau=1
@@ -75,9 +76,13 @@ def empirical_cdf(dist, x, n_samples=100, tau = 100) -> torch.Tensor:
     cdf_at_x = torch.sigmoid(tau * (x - samples)).prod(dim=2).mean(dim=1)
     return cdf_at_x
 
-def calculate_PIT(dist, y, n_samples, prerank, tau = 100):
+def calculate_PIT(dist, y, n_samples, prerank, setup = 'real', tau = 100):
     batch_size, dim = y.shape
-    samples = sample(dist, n_samples) #shape (256, 100, 4)
+    if setup == "simulated":
+        samples = dist.sample((n_samples,)).unsqueeze(0)
+    else:
+        samples = sample(dist, n_samples) #shape (256, 100, 4)
+        # samples = dist.sample((n_samples,)).permute(1, 0, 2)
     pits = []
     explained_var = np.ones(dim) * (1/dim)
     if prerank in ['mean', 'variance', 'dependency']:
@@ -130,9 +135,9 @@ def calculate_PIT(dist, y, n_samples, prerank, tau = 100):
     return torch.stack(pits), explained_var
 
 
-def pce(dist, y, n_samples = 100, prerank = 'pca'):
+def pce(dist, y, n_samples = 100, prerank = 'pca', setup = 'real'):
     alphas = torch.linspace(0, 1, 100, device=y.device)
-    pit_values, _ = calculate_PIT(dist, y, n_samples = n_samples, prerank = prerank) #shape (4,256,1) or (1, 256,1)
+    pit_values, _ = calculate_PIT(dist, y, n_samples = n_samples, prerank = prerank, setup=setup) #shape (4,256,1) or (1, 256,1)
     dim = pit_values.shape[0]
     pces = []
     cdfs = []

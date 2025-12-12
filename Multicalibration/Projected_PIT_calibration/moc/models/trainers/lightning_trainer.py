@@ -8,18 +8,6 @@ import torch
 import wandb
 from lightning.pytorch.loggers import WandbLogger
 
-# class CustomLogger(Callback):
-#     def __init__(self):
-#         self.train_losses = []
-#         self.val_losses = []
-
-#     def on_train_batch_end(self, trainer, pl_module, outputs, batch, batch_idx):
-#         loss = outputs['loss'].item()
-#         self.train_losses.append(loss)
-
-#     def on_validation_batch_end(self, trainer, pl_module, outputs, batch, batch_idx, dataloader_idx=0):
-#         loss = outputs.item()
-#         self.val_losses.append(loss)
 
 
 def get_lightning_trainer(rc):
@@ -33,9 +21,11 @@ def get_lightning_trainer(rc):
     #   - We can afford to measure validation during one fifth of the training
     # - Patience of 15
     wandb_logger = WandbLogger(
-        project="multicalibration",
-        name = f"{rc.dataset}_{rc.hparams['prerank']}_{rc.hparams['model']}_{rc.hparams['lambda']}",
+        project="next-calibration",
+        name = f"{rc.hparams['model']}_{rc.dataset}_{rc.hparams['prerank']}_{rc.hparams['lambda']}_{rc.hparams['seed']}",
+        # name = f"{rc.dataset}_{rc.hparams['prerank']}_{rc.hparams['model']}_{rc.hparams['lambda']}",
         log_model="best", #only the best model checkpoint will be uploaded to wandb
+        reinit = True,
     )
 
     ckpt = ModelCheckpoint(
@@ -64,7 +54,7 @@ def get_lightning_trainer(rc):
         'cuda': 'gpu',
     }[rc.config.device]
 
-    return Trainer(
+    trainer = Trainer(
         accelerator=accelerator,
         devices= 1,
         min_epochs=1,
@@ -79,3 +69,4 @@ def get_lightning_trainer(rc):
         # logger=wandb_logger,
         # deterministic = True,
     )
+    return trainer, wandb_logger
