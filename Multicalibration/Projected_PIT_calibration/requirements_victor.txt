@@ -45,8 +45,8 @@ bleach[css]==6.2.0
     # via nbconvert
 bokeh==3.6.3
     # via dask
-boltzgen @ git+https://github.com/VincentStimper/boltzmann-generators.git
-    # via larsflow
+# boltzgen @ git+https://github.com/VincentStimper/boltzmann-generators.git
+#     # via larsflow
 branca==0.8.1
     # via folium
 certifi==2025.1.31
@@ -74,8 +74,8 @@ contourpy==1.3.1
     # via
     #   bokeh
     #   matplotlib
-cpflows @ git+https://github.com/Vekteur/CP-Flow.git@gluonts-dependency
-    # via -r requirements.in
+# cpflows @ git+https://github.com/Vekteur/CP-Flow.git@gluonts-dependency
+#     # via -r requirements.in
 cycler==0.12.1
     # via
     #   cpflows
@@ -215,8 +215,8 @@ kiwisolver==1.4.8
     # via
     #   cpflows
     #   matplotlib
-larsflow @ git+https://github.com/VincentStimper/resampled-base-flows.git
-    # via -r requirements.in
+# larsflow @ git+https://github.com/VincentStimper/resampled-base-flows.git
+#     # via -r requirements.in
 lightning==2.5.0.post0
     # via -r requirements.in
 lightning-utilities==0.12.0
@@ -271,7 +271,7 @@ nest-asyncio==1.6.0
     # via ipykernel
 networkx==3.4.2
     # via torch
-normflows==1.7.3
+# normflows==1.7.3
     # via
     #   boltzgen
     #   larsflow
@@ -452,8 +452,8 @@ requests==2.32.3
     # via
     #   folium
     #   jupyterlab-server
-residual-flows @ git+https://github.com/VincentStimper/residual-flows.git
-    # via larsflow
+# residual-flows @ git+https://github.com/VincentStimper/residual-flows.git
+#     # via larsflow
 rfc3339-validator==0.1.4
     # via
     #   jsonschema
