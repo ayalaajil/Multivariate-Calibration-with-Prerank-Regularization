@@ -15,10 +15,11 @@ import os
 
 torch.set_printoptions(precision=3, sci_mode=False, threshold=float('inf'), edgeitems=40, linewidth=200)
 
+seed = 42
 datasets = [['camehl', 'households'], ['cevid', 'air'], ['cevid', 'births1'],
             ['cevid', 'births2'], ['cevid', 'wage'], ['mulan', 'scm20d'],
             ['mulan', 'rf2'], ['mulan', 'rf1'], ['mulan', 'scm1d'],
-            # ['mulan', 'sf2'], 
+            # ['mulan', 'sf2'],
             ['mulan', 'wq'], ['mulan', 'scpf'],
             ['feldman', 'meps_21'], ['feldman', 'meps_19'], ['feldman', 'meps_20'],
             ['feldman', 'house'], ['feldman', 'bio'], ['feldman', 'blog_data'],
@@ -42,7 +43,7 @@ for data_group, data_name in datasets:
     hparams = {
         'model': 'mixture',
     }
-    rc = RunConfig(config, data_group, data_name, hparams=hparams)
+    rc = RunConfig(config, data_group, data_name, hparams=hparams, seed=seed)
     datamodule = RealDataModule(rc, num_workers=8)
     p, q = datamodule.input_dim, datamodule.output_dim
 
@@ -63,9 +64,9 @@ for data_group, data_name in datasets:
             print(f"Working on {data_group}/{data_name} | prerank={prerank}, lambda={l}")
             rc.hparams["lambda"] = l
             rc.hparams["prerank"] = prerank
-
-            model = MixtureLightningModule(p, q, lambda_reg=l, reg_type='pce-kde', prerank=prerank)
-            trainer = get_lightning_trainer(rc)
+            rc.hparams["seed"] = seed
+            model = MixtureLightningModule(p, q, lambda_reg=l, prerank=prerank)
+            trainer, wandb_logger = get_lightning_trainer(rc)
 
             try:
                 trainer.fit(model, datamodule)

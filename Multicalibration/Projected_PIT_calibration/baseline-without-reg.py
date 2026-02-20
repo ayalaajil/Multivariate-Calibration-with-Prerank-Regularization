@@ -12,11 +12,18 @@ import torch
 
 torch.set_printoptions(precision=3, sci_mode=False, threshold=float('inf'), edgeitems=40, linewidth=200)
 
-datasets = [['camehl', 'households'], ['cevid', 'air'], ['cevid', 'births1'],
-            ['cevid', 'births2'], ['cevid', 'wage'], ['mulan', 'scm20d'], ['mulan', 'scm1d'],
-            ['mulan', 'wq'], ['mulan', 'scpf'], ['feldman', 'meps_21'], ['feldman', 'meps_19'],
+datasets = [
+            ['camehl', 'households'], ['cevid', 'air'],
+            ['cevid', 'births1'],
+            ['cevid', 'births2'],
+            ['cevid', 'wage'],
+            ['mulan', 'scm20d'],
+            ['mulan', 'scm1d'], ['mulan', 'wq'],
+            ['mulan', 'scpf'], ['feldman', 'meps_21'], ['feldman', 'meps_19'],
             ['feldman', 'meps_20'], ['feldman', 'house'], ['feldman', 'bio'], ['feldman', 'blog_data'],
-            ['del_barrio', 'calcofi'], ['del_barrio', 'ansur2'], ['wang', 'taxi']]
+            ['del_barrio', 'calcofi'],
+            ['del_barrio', 'ansur2'], ['wang', 'taxi']
+            ]
 
 config = get_config()
 config.device = 'cuda'
@@ -78,7 +85,7 @@ for data_group, data_name in datasets:
             x = x.to(config.device)
             y = y.to(config.device)
             dist = best_model.predict(x)
-            
+
             for prerank in test_preranks:
                 pce_prerank, _ = pce(dist, y, n_samples=best_model.hparams.es_num_samples, prerank=prerank)
                 data_to_store[f"pce_{prerank}"].append(pce_prerank.mean().item())

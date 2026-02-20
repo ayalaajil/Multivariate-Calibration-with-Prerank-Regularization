@@ -5,7 +5,7 @@ import torch
 def get_prerank(y, x, prerank, **kwargs):
 
     B, M, d = x.shape
-    
+
     # Check if prerank is a string (built-in function) or callable (custom function)
     if isinstance(prerank, str):
         if prerank == "mean":
@@ -19,13 +19,13 @@ def get_prerank(y, x, prerank, **kwargs):
     else:
         # User-defined function
         prerank_func = prerank
-    
+
     # Calculate pre-ranks
     obs_prerank = prerank_func(y) #256 values
     sample_preranks = prerank_func(x) #256,100
-    
+
     return obs_prerank, sample_preranks
-    
+
 
 def rho_dep(z, h=1):
     """
@@ -50,3 +50,5 @@ def rho_dep(z, h=1):
     var = torch.var(z, dim=-1, unbiased=False)
     # print(f" dep is {- compute_gamma(z) / var}")
     return - compute_gamma(z) / var
+
+

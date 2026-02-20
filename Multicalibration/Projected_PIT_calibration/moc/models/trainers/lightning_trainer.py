@@ -63,10 +63,10 @@ def get_lightning_trainer(rc):
         num_sanity_val_steps=0,
         log_every_n_steps=1,
         check_val_every_n_epoch=1,
-        enable_model_summary=False,
-        enable_progress_bar=False,
+        enable_model_summary=True,
+        enable_progress_bar=True,
         callbacks=callbacks,
-        # logger=wandb_logger,
+        logger=wandb_logger,
         # deterministic = True,
     )
     return trainer, wandb_logger
